@@ -5,159 +5,145 @@ import { SectionCard } from "@/components/section-card";
 import { StatsGrid } from "@/components/stats-grid";
 import { StatusBadge } from "@/components/status-badge";
 import { requireRole } from "@/lib/auth";
-import { resolveTableName } from "@/lib/db";
-import { buildIntegrationManifest } from "@/lib/integration-catalog";
-import { getIntegrationSummary, listIntegrationRecords, listStudents } from "@/lib/data";
+import {
+  getRegistrarDepartmentFlowSummary,
+  listRegistrarDepartmentFlowEvents,
+  listRegistrarIncomingDepartments,
+  listRegistrarOutgoingDepartments
+} from "@/lib/department-integration";
+import { listStudents } from "@/lib/data";
+
+function formatDateTime(value: string | null) {
+  if (!value) return "-";
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return date.toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit"
+  });
+}
 
 export default async function IntegrationsPage() {
   const user = await requireRole("Administrator");
-  const [summary, records, students, integrationRecordsTable] = await Promise.all([
-    getIntegrationSummary(),
-    listIntegrationRecords(),
-    listStudents(),
-    resolveTableName("integration_records")
+  const [summary, outgoing, incoming, events, students] = await Promise.all([
+    getRegistrarDepartmentFlowSummary(),
+    listRegistrarOutgoingDepartments(),
+    listRegistrarIncomingDepartments(),
+    listRegistrarDepartmentFlowEvents(30),
+    listStudents()
   ]);
-  const integrationsEnabled = Boolean(integrationRecordsTable);
-  const manifest = buildIntegrationManifest("/api/integrations");
 
   return (
     <AppShell
       user={user}
       title="Office Integrations"
-      description="The PHP integration console is now translated into a TypeScript admin page with Supabase-backed records."
+      description="Manage registrar-to-department connections through the shared Supabase department flow registry."
     >
       <StatsGrid
         stats={[
-          { label: "Incoming Offices", value: summary.incomingOffices, note: "Detected offices with recorded transactions." },
-          { label: "Outgoing Feeds", value: summary.outgoingFeeds, note: "Prepared external data feeds." },
-          { label: "Records Received", value: summary.recordsReceived, note: "Stored integration transactions." },
-          { label: "Translation", value: "Live", note: "This module is running in the Next.js app." }
+          {
+            label: "Outgoing Departments",
+            value: summary.outgoing_departments,
+            note: `${summary.outgoing_routes} active registrar route(s).`
+          },
+          {
+            label: "Incoming Departments",
+            value: summary.incoming_departments,
+            note: `${summary.incoming_routes} route(s) currently targeting registrar.`
+          },
+          {
+            label: "Queued Events",
+            value: summary.queued_events,
+            note: "Queued, pending, or in-progress registrar department flows."
+          },
+          {
+            label: "Completed Events",
+            value: summary.completed_events,
+            note: `${summary.failed_events} failed or blocked event(s) on record.`
+          }
         ]}
       />
 
-      <section className="integration-grid">
-        <article className="integration-card">
-          <div className="eyebrow">External Validation Panels</div>
-          <h3>Student Clearance Status</h3>
-          <div className="status-stack">
-            <div className="status-row"><div><strong>Payment Status</strong><div className="status-meta">Cashier feed</div></div><StatusBadge value="Paid" /></div>
-            <div className="status-row"><div><strong>Medical Clearance</strong><div className="status-meta">Clinic integration</div></div><StatusBadge value="Cleared" /></div>
-            <div className="status-row"><div><strong>Discipline Record</strong><div className="status-meta">Prefect office</div></div><StatusBadge value="None" /></div>
-            <div className="status-row"><div><strong>Counseling</strong><div className="status-meta">Guidance workflow</div></div><StatusBadge value="Pending" /></div>
-          </div>
-        </article>
-        <article className="integration-card">
-          <div className="eyebrow">Connectivity</div>
-          <h3>Integration Health</h3>
-          <div className="status-stack">
-            <div className="status-row"><div><strong>Cashier</strong><div className="status-meta">Last sync: Today</div></div><StatusBadge value="Connected" /></div>
-            <div className="status-row"><div><strong>Clinic</strong><div className="status-meta">Last sync: Today</div></div><StatusBadge value="Connected" /></div>
-            <div className="status-row"><div><strong>Guidance</strong><div className="status-meta">Last sync: Yesterday</div></div><StatusBadge value="Pending" /></div>
-            <div className="status-row"><div><strong>Prefect</strong><div className="status-meta">Last sync: Today</div></div><StatusBadge value="Connected" /></div>
-          </div>
-        </article>
-      </section>
+      {!summary.enabled ? (
+        <div className="error-banner">
+          The shared department integration tables are not available in this database yet, so the registrar cannot queue connected department flows.
+        </div>
+      ) : null}
 
       <div className="content-grid two-col">
-        <SectionCard title="Automatic Incoming Sync" description="Incoming records should arrive through connected office endpoints automatically.">
-          {!integrationsEnabled ? (
-            <div className="error-banner">The `integration_records` table is not available in this database yet, so automatic incoming logging is not active.</div>
-          ) : (
-            <div className="success-banner">
-              <div>
-                <strong>Automatic sync is enabled.</strong> Connected systems should post directly to the registrar integration endpoints without manual staff encoding.
-              </div>
-            </div>
-          )}
-          <div className="status-stack">
-            {manifest.incoming.map((entry) => (
-              <div key={entry.key} className="status-row">
-                <div>
-                  <strong>{entry.label}</strong>
-                  <div className="status-meta">{entry.office} {"->"} Registrar</div>
-                  <div className="status-meta">Endpoint: <code>{entry.path}</code></div>
+        <SectionCard title="Outgoing Connections" description="Connected departments that Registrar can actively dispatch to.">
+          {outgoing.length ? (
+            <div className="status-stack">
+              {outgoing.map((entry) => (
+                <div key={entry.department_key} className="status-row">
+                  <div>
+                    <strong>{entry.department_name}</strong>
+                    <div className="status-meta">{entry.purpose}</div>
+                    <div className="status-meta">Primary route: {entry.routes[0]?.flow_name ?? "No active route"}</div>
+                    <div className="status-meta">
+                      Endpoint: <code>{entry.dispatch_endpoint}</code>
+                    </div>
+                  </div>
+                  <StatusBadge value={entry.latest_status ?? "Ready"} />
                 </div>
-                <StatusBadge value={integrationsEnabled ? "Connected" : "Pending"} />
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          ) : (
+            <div className="status-meta">No outbound registrar routes are active yet.</div>
+          )}
         </SectionCard>
 
-        <SectionCard title="Integration Notes" description="The richer outbound preview tooling from PHP can be ported next.">
-          <div className="panel-stack">
-            <div>
-              <div className="eyebrow">Receives</div>
-              <p>Payment confirmation, medical clearance, counseling reports, discipline records, and activity participation records.</p>
+        <SectionCard title="Incoming Connections" description="Departments that currently route shared flow events into Registrar.">
+          {incoming.length ? (
+            <div className="status-stack">
+              {incoming.map((entry) => (
+                <div key={entry.department_key} className="status-row">
+                  <div>
+                    <strong>{entry.department_name}</strong>
+                    <div className="status-meta">{entry.purpose}</div>
+                    <div className="status-meta">Routes into Registrar: {entry.route_count}</div>
+                    <div className="status-meta">Latest event: {entry.latest_event_code ?? "None yet"}</div>
+                  </div>
+                  <StatusBadge value={entry.latest_status ?? "Waiting"} />
+                </div>
+              ))}
             </div>
-            <div>
-              <div className="eyebrow">Sends</div>
-              <p>Enrollment data, student personal information, student academic records, student list, and enrollment statistics.</p>
-            </div>
-          </div>
+          ) : (
+            <div className="status-meta">No inbound department-flow routes are currently configured for Registrar.</div>
+          )}
         </SectionCard>
       </div>
 
-      <SectionCard title="Send Outgoing Data" description="Use the send buttons below to transmit registrar payloads to connected offices.">
+      <SectionCard title="Send Registrar Flows" description="Preview registrar payloads and queue them to the selected connected department.">
         <IntegrationSendPanel
           students={students as Array<{ id: number; student_no: string; first_name: string; last_name: string }>}
-          outgoing={manifest.outgoing}
+          outgoing={outgoing}
         />
       </SectionCard>
 
-      <SectionCard title="Endpoint Directory" description="Registrar integration endpoints and folder ownership across connected systems.">
-        <div className="integration-grid">
-          <article className="integration-card">
-            <div className="eyebrow">Incoming To Registrar</div>
-            <h3>Receiving Endpoints</h3>
-            <div className="status-stack">
-              {manifest.incoming.map((entry) => (
-                <div key={entry.key} className="status-row">
-                  <div>
-                    <strong>{entry.label}</strong>
-                    <div className="status-meta">{entry.office} - <code>{entry.path}</code></div>
-                    <div className="status-meta">Folders: {entry.systemFolders.join(", ")}</div>
-                  </div>
-                  <StatusBadge value={entry.uiMode === "folder" ? "Connected" : "Ready"} />
-                </div>
-              ))}
-            </div>
-          </article>
-
-          <article className="integration-card">
-            <div className="eyebrow">Outgoing From Registrar</div>
-            <h3>Consumer Endpoints</h3>
-            <div className="status-stack">
-              {manifest.outgoing.map((entry) => (
-                <div key={entry.key} className="status-row">
-                  <div>
-                    <strong>{entry.label}</strong>
-                    <div className="status-meta">{entry.office} - <code>{entry.path}</code></div>
-                    <div className="status-meta">Consumers: {entry.consumers.join(", ")}</div>
-                  </div>
-                  <StatusBadge value={entry.uiMode === "api" ? "Active" : "Connected"} />
-                </div>
-              ))}
-            </div>
-          </article>
-        </div>
-      </SectionCard>
-
-      <SectionCard title="Recent Integration Records" description="Latest incoming transactions from connected offices.">
-        {!integrationsEnabled ? (
-          <div className="error-banner">Recent integration records are unavailable because the `integration_records` table has not been created yet.</div>
-        ) : (
-          <DataTable headers={["Office", "Record Type", "Student", "Status", "Reference", "Received"]}>
-            {records.map((record: any) => (
-              <tr key={record.id}>
-                <td>{String(record.source_office)}</td>
-                <td>{String(record.record_type)}</td>
-                <td>{record.student_no ? `${String(record.student_no)} - ${String(record.last_name)}, ${String(record.first_name)}` : "-"}</td>
-                <td><StatusBadge value={String(record.external_status)} /></td>
-                <td>{String(record.reference_no)}</td>
-                <td>{String(record.received_at)}</td>
+      <SectionCard title="Recent Department Flow Events" description="Latest registrar flow events recorded in the shared integration event ledger.">
+        {events.length ? (
+          <DataTable headers={["Flow", "Source", "Target", "Status", "Correlation", "Created"]}>
+            {events.map((event) => (
+              <tr key={event.id}>
+                <td>{event.flow_name}</td>
+                <td>{event.source_department_name}</td>
+                <td>{event.target_department_name}</td>
+                <td><StatusBadge value={event.status} /></td>
+                <td>{event.correlation_id}</td>
+                <td>{formatDateTime(event.created_at)}</td>
               </tr>
             ))}
           </DataTable>
+        ) : (
+          <div className="status-meta">No registrar department flow events have been recorded yet.</div>
         )}
       </SectionCard>
     </AppShell>

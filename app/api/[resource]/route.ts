@@ -1,6 +1,14 @@
 import { NextResponse } from "next/server";
 import { env } from "@/lib/env";
 import { resolveTableName } from "@/lib/db";
+import {
+  dispatchRegistrarDepartmentFlow,
+  getRegistrarDepartmentFlowStatus,
+  getRegistrarDepartmentFlowSummary,
+  getRegistrarDepartmentPreview,
+  listRegistrarIncomingDepartments,
+  listRegistrarOutgoingDepartments
+} from "@/lib/department-integration";
 import { buildIntegrationManifest, integrationCatalog } from "@/lib/integration-catalog";
 import { deliverIntegrationResource } from "@/lib/integration-delivery";
 import { getIntegrationPayload } from "@/lib/integration-payload";
@@ -104,6 +112,56 @@ export async function GET(request: Request, context: { params: Promise<{ resourc
   try {
     if (slug === "integrations") {
       const integrationResource = String(url.searchParams.get("resource") ?? "manifest").toLowerCase();
+      if (integrationResource === "department-manifest") {
+        const user = await requireIntegrationAccess(request);
+        if (!user) return json({ ok: false, error: "Unauthorized." }, 401);
+
+        const [summary, outgoing, incoming] = await Promise.all([
+          getRegistrarDepartmentFlowSummary(),
+          listRegistrarOutgoingDepartments(),
+          listRegistrarIncomingDepartments()
+        ]);
+
+        return json({
+          ok: true,
+          data: {
+            source_department_key: "registrar",
+            summary,
+            outgoing,
+            incoming
+          }
+        });
+      }
+      if (integrationResource === "department-preview") {
+        const user = await requireIntegrationAccess(request);
+        if (!user) return json({ ok: false, error: "Unauthorized." }, 401);
+
+        const preview = await getRegistrarDepartmentPreview({
+          targetDepartmentKey: String(url.searchParams.get("target_department_key") ?? "").trim(),
+          eventCode: String(url.searchParams.get("event_code") ?? "").trim() || undefined,
+          studentNo: String(url.searchParams.get("student_no") ?? "").trim() || undefined,
+          studentId: Number(url.searchParams.get("student_id") ?? 0) || undefined
+        });
+
+        return json({
+          ok: true,
+          message: "Department flow preview prepared.",
+          data: {
+            preview
+          }
+        });
+      }
+      if (integrationResource === "department-status") {
+        const user = await requireIntegrationAccess(request);
+        if (!user) return json({ ok: false, error: "Unauthorized." }, 401);
+
+        const status = await getRegistrarDepartmentFlowStatus({
+          eventId: String(url.searchParams.get("event_id") ?? "").trim() || undefined,
+          correlationId: String(url.searchParams.get("correlation_id") ?? "").trim() || undefined
+        });
+
+        return json({ ok: status.ok, data: status }, status.ok ? 200 : 404);
+      }
       const outgoingMapping = integrationCatalog.find((entry) => entry.direction === "outgoing" && entry.key === integrationResource);
       const user = outgoingMapping ? await requireIntegrationAccess(request) : await requireIntegrationUser(request);
       if (!user) return json({ ok: false, error: "Unauthorized." }, 401);
@@ -168,8 +226,39 @@ export async function POST(request: Request, context: { params: Promise<{ resour
   try {
     if (slug === "integrations") {
       const integrationResource = String(input.resource ?? "").toLowerCase();
+      const action = String(input.action ?? "").toLowerCase();
+      if (action === "dispatch_department_flow") {
+        const user = await requireIntegrationAccess(request);
+        if (!user) return json({ ok: false, error: "Unauthorized." }, 401);
+
+        const preview = await getRegistrarDepartmentPreview({
+          targetDepartmentKey: String(input.target_department_key ?? input.targetDepartmentKey ?? "").trim(),
+          eventCode: String(input.event_code ?? input.eventCode ?? "").trim() || undefined,
+          studentNo: String(input.student_no ?? input.studentNo ?? "").trim() || undefined,
+          studentId: Number(input.student_id ?? input.studentId ?? 0) || undefined
+        });
+        const dispatch = await dispatchRegistrarDepartmentFlow({
+          targetDepartmentKey: String(input.target_department_key ?? input.targetDepartmentKey ?? "").trim(),
+          eventCode: String(input.event_code ?? input.eventCode ?? "").trim() || undefined,
+          studentNo: String(input.student_no ?? input.studentNo ?? "").trim() || undefined,
+          studentId: Number(input.student_id ?? input.studentId ?? 0) || undefined,
+          sourceRecordId: String(input.source_record_id ?? input.sourceRecordId ?? "").trim() || undefined
+        });
+
+        return json(
+          {
+            ok: dispatch.ok,
+            message: dispatch.message,
+            data: {
+              preview,
+              dispatch
+            }
+          },
+          dispatch.ok ? 200 : 422
+        );
+      }
       const outgoingMapping = integrationCatalog.find((entry) => entry.direction === "outgoing" && entry.key === integrationResource);
-      if (String(input.action ?? "").toLowerCase() === "deliver" && outgoingMapping) {
+      if (action === "deliver" && outgoingMapping) {
         const user = await requireIntegrationAccess(request);
         if (!user) return json({ ok: false, error: "Unauthorized." }, 401);
 

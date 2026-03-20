@@ -3,7 +3,7 @@ import { IntegrationSendPanel } from "@/components/integration-send-panel";
 import { SectionCard } from "@/components/section-card";
 import { StudentsTablePanel } from "@/components/students-table-panel";
 import { requireRole } from "@/lib/auth";
-import { buildIntegrationManifest } from "@/lib/integration-catalog";
+import { listRegistrarOutgoingDepartments } from "@/lib/department-integration";
 import { getNextStudentNumber, getStudentFilters, listStudents } from "@/lib/data";
 
 export default async function StudentsPage({
@@ -18,10 +18,7 @@ export default async function StudentsPage({
     getStudentFilters(),
     getNextStudentNumber()
   ]);
-  const manifest = buildIntegrationManifest("/api/integrations");
-  const studentOutgoing = manifest.outgoing.filter((entry) =>
-    ["student-personal-info", "student-list"].includes(entry.key)
-  );
+  const studentOutgoing = await listRegistrarOutgoingDepartments();
   const isAdmin = user.role.trim().toLowerCase() === "admin";
 
   return (
@@ -45,7 +42,7 @@ export default async function StudentsPage({
         </SectionCard>
 
         {isAdmin ? (
-          <SectionCard title="Student Data Integrations" description="Student profile feeds are handled directly from the student records page.">
+          <SectionCard title="Student Data Integrations" description="Queue registrar student profile and roster flows to the connected departments from this page.">
             <IntegrationSendPanel
               students={students as Array<{ id: number; student_no: string; first_name: string; last_name: string }>}
               outgoing={studentOutgoing}

@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { DataTable } from "@/components/data-table";
+import { StatusBadge } from "@/components/status-badge";
 
 type StudentOption = {
   id: number | string;
@@ -10,39 +11,42 @@ type StudentOption = {
   last_name: string;
 };
 
-type OutgoingEntry = {
-  key: string;
-  label: string;
-  office: string;
-  description: string;
-  consumers: string[];
-  path: string;
+type DepartmentRouteSummary = {
+  route_key: string;
+  flow_name: string;
+  event_code: string;
+  endpoint_path: string;
+  priority: number;
+  is_required: boolean;
+};
+
+type OutgoingDepartment = {
+  department_key: string;
+  department_name: string;
+  purpose: string;
+  default_action_label: string;
+  dispatch_endpoint: string;
+  route_count: number;
+  pending_count: number;
+  in_progress_count: number;
+  failed_count: number;
+  completed_count: number;
+  latest_status: string | null;
+  latest_event_code: string | null;
+  latest_correlation_id: string | null;
+  latest_created_at: string | null;
+  routes: DepartmentRouteSummary[];
 };
 
 type PreviewState = {
   endpoint: string;
+  routeLabel: string;
+  targetLabel: string;
   columns: string[];
   rows: Array<Record<string, string>>;
   raw: string;
+  notes: string[];
 };
-
-type DestinationOption = {
-  value: string;
-  label: string;
-  entry: OutgoingEntry;
-};
-
-function normalizeConsumerLabel(value: string) {
-  if (value === "PrefectManagementsSystem") {
-    return "Prefect";
-  }
-
-  if (value === "CRADManagement") {
-    return "CRAD";
-  }
-
-  return value;
-}
 
 function titleCase(value: string) {
   return value
@@ -62,56 +66,61 @@ function stringifyCell(value: unknown) {
   return String(value);
 }
 
-function buildPreview(payload: any, endpoint: string): PreviewState {
-  const data = payload?.data ?? {};
-  const candidates = Object.entries(data).find(([, value]) => Array.isArray(value));
+function buildPreview(payload: any): PreviewState {
+  const preview = payload?.data?.preview ?? {};
+  const dispatch = payload?.data?.dispatch ?? null;
+  const route = preview?.route ?? null;
+  const requestPayload = (preview?.payload ?? {}) as Record<string, unknown>;
+  const endpoint =
+    dispatch?.dispatch_endpoint ??
+    preview?.endpoint ??
+    route?.endpoint_path ??
+    "/rest/v1/rpc/dispatch_department_flow";
 
-  if (candidates && Array.isArray(candidates[1])) {
-    const rows = candidates[1] as Array<Record<string, unknown>>;
-    const sample = rows[0] ?? {};
-    const columns = Object.keys(sample).slice(0, 6);
-
-    return {
-      endpoint,
-      columns: columns.length ? columns : ["result"],
-      rows: rows.map((row) =>
-        (columns.length ? columns : ["result"]).reduce<Record<string, string>>((accumulator, column) => {
-          accumulator[column] = columns.length ? stringifyCell(row[column]) : stringifyCell(row);
-          return accumulator;
-        }, {})
-      ),
-      raw: JSON.stringify({ endpoint, ...payload }, null, 2)
-    };
-  }
-
-  if (data.student && typeof data.student === "object") {
-    const student = data.student as Record<string, unknown>;
-    const columns = ["student_no", "first_name", "last_name", "program", "year_level", "status"];
-
-    return {
-      endpoint,
-      columns,
-      rows: [
-        columns.reduce<Record<string, string>>((accumulator, column) => {
-          accumulator[column] = stringifyCell(student[column]);
-          return accumulator;
-        }, {})
-      ],
-      raw: JSON.stringify({ endpoint, ...payload }, null, 2)
-    };
-  }
-
-  const rows = Object.entries(data).map(([key, value]) => ({
-    metric: titleCase(key),
-    value: stringifyCell(value)
+  const preferredKeys = [
+    "student_no",
+    "student_name",
+    "program",
+    "year_level",
+    "section_name",
+    "enrollment_status",
+    "course_year_section",
+    "subject_count",
+    "subject_codes",
+    "email",
+    "phone",
+    "event_code"
+  ];
+  const orderedKeys = [
+    ...preferredKeys.filter((key) => key in requestPayload),
+    ...Object.keys(requestPayload).filter((key) => !preferredKeys.includes(key))
+  ];
+  const rows = orderedKeys.map((key) => ({
+    field: titleCase(key),
+    value: stringifyCell(requestPayload[key])
   }));
 
   return {
     endpoint,
-    columns: ["metric", "value"],
+    routeLabel: route?.flow_name ?? route?.event_code ?? "Department Flow",
+    targetLabel: preview?.target_department_name ?? preview?.target_department_key ?? "Connected Department",
+    columns: ["field", "value"],
     rows,
-    raw: JSON.stringify({ endpoint, ...payload }, null, 2)
+    raw: JSON.stringify(payload, null, 2),
+    notes: [
+      `Route Key: ${route?.route_key ?? "-"}`,
+      `Event Code: ${dispatch?.event_code ?? route?.event_code ?? "-"}`,
+      `Source Record: ${preview?.source_record_id ?? "-"}`,
+      `Status: ${dispatch?.status ?? "Preview Prepared"}`,
+      `Correlation: ${dispatch?.correlation_id ?? "-"}`,
+      `Event Id: ${dispatch?.event_id ?? "-"}`
+    ]
   };
+}
+
+async function parseResponse(response: Response) {
+  const text = await response.text();
+  return text ? JSON.parse(text) : {};
 }
 
 export function IntegrationSendPanel({
@@ -119,165 +128,25 @@ export function IntegrationSendPanel({
   outgoing
 }: {
   students: StudentOption[];
-  outgoing: OutgoingEntry[];
+  outgoing: OutgoingDepartment[];
 }) {
   const [selectedStudentNo, setSelectedStudentNo] = useState(students[0]?.student_no ?? "");
+  const [selectedDepartmentKey, setSelectedDepartmentKey] = useState(outgoing[0]?.department_key ?? "");
   const [busyKey, setBusyKey] = useState("");
-  const [responseText, setResponseText] = useState("Choose an outgoing feed and click Send to open a confirmation preview.");
+  const [responseText, setResponseText] = useState(
+    outgoing.length
+      ? "Choose a connected department and open the preview to inspect the registrar payload before dispatch."
+      : "No outgoing registrar department routes are configured yet."
+  );
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [previewState, setPreviewState] = useState<PreviewState | null>(null);
   const [filterText, setFilterText] = useState("");
-  const destinationOptions = useMemo<DestinationOption[]>(
-    () =>
-      outgoing.flatMap((entry) => {
-        const seen = new Set<string>();
 
-        return entry.consumers.flatMap((consumer) => {
-          const normalizedConsumer = normalizeConsumerLabel(consumer);
-
-          if (seen.has(normalizedConsumer)) {
-            return [];
-          }
-
-          seen.add(normalizedConsumer);
-
-          return {
-            value: `${entry.key}:${normalizedConsumer}`,
-            label: normalizedConsumer,
-            entry
-          };
-        });
-      }),
-    [outgoing]
+  const selectedDepartment = useMemo(
+    () => outgoing.find((item) => item.department_key === selectedDepartmentKey) ?? outgoing[0] ?? null,
+    [outgoing, selectedDepartmentKey]
   );
-  const [selectedDestination, setSelectedDestination] = useState(destinationOptions[0]?.value ?? "");
-
-  const studentRequiredKeys = useMemo(
-    () => new Set(["enrollment-data", "student-personal-info", "student-academic-records"]),
-    []
-  );
-  const selectedDestinationOption = useMemo(
-    () => destinationOptions.find((option) => option.value === selectedDestination) ?? destinationOptions[0] ?? null,
-    [destinationOptions, selectedDestination]
-  );
-  const activeEntry = selectedDestinationOption?.entry ?? null;
-
-  const studentListPreview = useMemo<PreviewState>(
-    () => ({
-      endpoint: "/api/integrations?resource=student-list",
-      columns: ["student_no", "first_name", "last_name"],
-      rows: students.map((student) => ({
-        student_no: student.student_no,
-        first_name: student.first_name,
-        last_name: student.last_name
-      })),
-      raw: JSON.stringify(
-        {
-          endpoint: "/api/integrations?resource=student-list",
-          ok: true,
-          data: { students }
-        },
-        null,
-        2
-      )
-    }),
-    [students]
-  );
-
-  async function fetchPayload(entry: OutgoingEntry, studentNo = selectedStudentNo) {
-    const requiresStudent = studentRequiredKeys.has(entry.key);
-    const url = new URL(entry.path, window.location.origin);
-
-    if (requiresStudent && studentNo) {
-      url.searchParams.set("student_no", studentNo);
-    }
-
-    const response = await fetch(url.toString(), {
-      credentials: "same-origin"
-    });
-    const payload = await response.json();
-    return buildPreview(payload, url.toString());
-  }
-
-  async function refreshPreview(entry: OutgoingEntry, studentNo = selectedStudentNo) {
-    setFilterText("");
-    if (entry.key === "student-list") {
-      setPreviewState(studentListPreview);
-      return;
-    }
-
-    setBusyKey(entry.key);
-
-    try {
-      const preview = await fetchPayload(entry, studentNo);
-      setPreviewState(preview);
-    } catch (error) {
-      setPreviewState({
-        endpoint: entry.path,
-        columns: ["error"],
-        rows: [{ error: error instanceof Error ? error.message : "Request failed." }],
-        raw: JSON.stringify(
-          {
-            ok: false,
-            error: error instanceof Error ? error.message : "Request failed."
-          },
-          null,
-          2
-        )
-      });
-    } finally {
-      setBusyKey("");
-    }
-  }
-
-  async function openSendModal(entry: OutgoingEntry) {
-    setIsModalOpen(true);
-    await refreshPreview(entry);
-  }
-
-  async function confirmSend() {
-    if (!activeEntry) return;
-
-    setBusyKey(activeEntry.key);
-    try {
-      const response = await fetch("/api/integrations", {
-        method: "POST",
-        credentials: "same-origin",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          action: "deliver",
-          resource: activeEntry.key,
-          student_no: selectedStudentNo,
-          consumer: selectedDestinationOption?.label ?? activeEntry.office
-        })
-      });
-      const payload = await response.json();
-      const deliveryPreview = buildPreview(payload, `/api/integrations [deliver:${activeEntry.key}]`);
-      setPreviewState(deliveryPreview);
-      setResponseText(JSON.stringify(payload, null, 2));
-      setIsModalOpen(false);
-    } catch (error) {
-      const raw = JSON.stringify(
-        {
-          ok: false,
-          error: error instanceof Error ? error.message : "Request failed."
-        },
-        null,
-        2
-      );
-      setResponseText(raw);
-      setPreviewState({
-        endpoint: activeEntry.path,
-        columns: ["error"],
-        rows: [{ error: error instanceof Error ? error.message : "Request failed." }],
-        raw
-      });
-    } finally {
-      setBusyKey("");
-    }
-  }
+  const selectedRoute = selectedDepartment?.routes[0] ?? null;
 
   const filteredRows = useMemo(() => {
     if (!previewState) return [];
@@ -290,121 +159,291 @@ export function IntegrationSendPanel({
     );
   }, [filterText, previewState]);
 
-  const destinationGroupLabel = "Clinic / Guidance / Prefect / CRAD";
-  const integrationModeLabel =
-    activeEntry?.key === "student-list"
-      ? "Student list will be prepared for CRAD and Computer Laboratory consumers."
-      : "Student personal information will be prepared for Clinic, Guidance, and Prefect consumers.";
+  async function refreshPreview(nextDepartment = selectedDepartment, nextStudentNo = selectedStudentNo) {
+    if (!nextDepartment) {
+      setPreviewState(null);
+      return;
+    }
+
+    const nextRoute = nextDepartment.routes[0] ?? null;
+
+    if (!nextStudentNo) {
+      setPreviewState({
+        endpoint: nextDepartment.dispatch_endpoint,
+        routeLabel: nextDepartment.department_name,
+        targetLabel: nextDepartment.department_name,
+        columns: ["field", "value"],
+        rows: [{ field: "Error", value: "A student record is required before building the preview." }],
+        raw: JSON.stringify({ ok: false, error: "Student selection is required." }, null, 2),
+        notes: [`Route Key: ${nextRoute?.route_key ?? "-"}`]
+      });
+      return;
+    }
+
+    setBusyKey(nextDepartment.department_key);
+    setFilterText("");
+
+    try {
+      const url = new URL("/api/integrations", window.location.origin);
+      url.searchParams.set("resource", "department-preview");
+      url.searchParams.set("target_department_key", nextDepartment.department_key);
+      url.searchParams.set("student_no", nextStudentNo);
+      if (nextRoute?.event_code) {
+        url.searchParams.set("event_code", nextRoute.event_code);
+      }
+
+      const response = await fetch(url.toString(), {
+        credentials: "same-origin"
+      });
+      const payload = await parseResponse(response);
+
+      if (!response.ok || !payload?.ok) {
+        throw new Error(payload?.error ?? payload?.message ?? "Failed to build department flow preview.");
+      }
+
+      setPreviewState(buildPreview(payload));
+    } catch (error) {
+      const raw = JSON.stringify(
+        {
+          ok: false,
+          error: error instanceof Error ? error.message : "Request failed."
+        },
+        null,
+        2
+      );
+
+      setPreviewState({
+        endpoint: nextDepartment.dispatch_endpoint,
+        routeLabel: nextRoute?.flow_name ?? "Department Flow",
+        targetLabel: nextDepartment.department_name,
+        columns: ["field", "value"],
+        rows: [{ field: "Error", value: error instanceof Error ? error.message : "Request failed." }],
+        raw,
+        notes: [`Route Key: ${nextRoute?.route_key ?? "-"}`]
+      });
+    } finally {
+      setBusyKey("");
+    }
+  }
+
+  async function openSendModal() {
+    if (!selectedDepartment) return;
+
+    setIsModalOpen(true);
+    await refreshPreview(selectedDepartment);
+  }
+
+  async function confirmSend() {
+    if (!selectedDepartment) return;
+
+    setBusyKey(selectedDepartment.department_key);
+
+    try {
+      const response = await fetch("/api/integrations", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          action: "dispatch_department_flow",
+          target_department_key: selectedDepartment.department_key,
+          student_no: selectedStudentNo,
+          event_code: selectedRoute?.event_code
+        })
+      });
+      const payload = await parseResponse(response);
+
+      if (!response.ok || !payload?.ok) {
+        throw new Error(payload?.error ?? payload?.message ?? "Failed to queue department flow.");
+      }
+
+      const preview = buildPreview(payload);
+      setPreviewState(preview);
+      setResponseText(preview.raw);
+      setIsModalOpen(false);
+    } catch (error) {
+      const raw = JSON.stringify(
+        {
+          ok: false,
+          error: error instanceof Error ? error.message : "Request failed."
+        },
+        null,
+        2
+      );
+
+      setResponseText(raw);
+      setPreviewState({
+        endpoint: selectedDepartment.dispatch_endpoint,
+        routeLabel: selectedRoute?.flow_name ?? "Department Flow",
+        targetLabel: selectedDepartment.department_name,
+        columns: ["field", "value"],
+        rows: [{ field: "Error", value: error instanceof Error ? error.message : "Request failed." }],
+        raw,
+        notes: [`Route Key: ${selectedRoute?.route_key ?? "-"}`]
+      });
+    } finally {
+      setBusyKey("");
+    }
+  }
+
+  if (!outgoing.length) {
+    return <div className="error-banner">Registrar does not have any active connected department routes in the shared integration registry yet.</div>;
+  }
 
   return (
     <>
       <div className="content-grid two-col">
         <div className="panel-stack">
-          <div className="form-cluster">
-            <div className="field-hint">{integrationModeLabel}</div>
-            {activeEntry ? (
-              <div className="integration-card top-gap">
-                <div className="eyebrow">{destinationGroupLabel}</div>
-                <h3>Student List & Information</h3>
-                <p className="stat-note">{integrationModeLabel}</p>
-                <div className="status-meta">Destination: {selectedDestinationOption?.label ?? "-"}</div>
-                <div className="status-meta">Endpoint: <code>{activeEntry.path}</code></div>
-                <div className="top-gap">
-                  <button className="primary" type="button" onClick={() => openSendModal(activeEntry)} disabled={busyKey !== ""}>
-                    {busyKey === activeEntry.key ? "Loading..." : "Send Student List & Information"}
-                  </button>
+          <div className="field-hint">
+            Queue shared department-flow events from Registrar to the connected department selected below.
+          </div>
+          {selectedDepartment ? (
+            <div className="integration-card top-gap">
+              <div className="eyebrow">Connected Department</div>
+              <h3>{selectedDepartment.department_name}</h3>
+              <p className="stat-note">{selectedDepartment.purpose}</p>
+              <div className="status-stack top-gap">
+                <div className="status-row">
+                  <div>
+                    <strong>Primary Route</strong>
+                    <div className="status-meta">{selectedRoute?.flow_name ?? "No route configured"}</div>
+                  </div>
+                  <StatusBadge value={selectedDepartment.latest_status ?? "Ready"} />
+                </div>
+                <div className="status-row">
+                  <div>
+                    <strong>Dispatch Endpoint</strong>
+                    <div className="status-meta">
+                      <code>{selectedDepartment.dispatch_endpoint}</code>
+                    </div>
+                  </div>
+                  <span className="status-meta">{selectedDepartment.route_count} route(s)</span>
+                </div>
+                <div className="status-row">
+                  <div>
+                    <strong>Recent Queue</strong>
+                    <div className="status-meta">
+                      Pending {selectedDepartment.pending_count} | In Progress {selectedDepartment.in_progress_count}
+                    </div>
+                  </div>
+                  <span className="status-meta">Completed {selectedDepartment.completed_count}</span>
                 </div>
               </div>
-            ) : null}
-          </div>
+              <div className="top-gap">
+                <button
+                  className="primary"
+                  type="button"
+                  onClick={() => openSendModal()}
+                  disabled={busyKey !== "" || !selectedStudentNo}
+                >
+                  {busyKey === selectedDepartment.department_key
+                    ? "Loading..."
+                    : selectedDepartment.default_action_label || `Send to ${selectedDepartment.department_name}`}
+                </button>
+              </div>
+            </div>
+          ) : null}
         </div>
 
         <div className="section-card soft-panel">
           <div className="section-head">
             <div>
-              <h2>Last Sent Payload</h2>
-              <p>The most recent confirmed outgoing response appears here.</p>
+              <h2>Last Flow Response</h2>
+              <p>The latest preview or dispatch response appears here.</p>
             </div>
           </div>
           <pre className="integration-preview">{responseText}</pre>
         </div>
       </div>
 
-      {isModalOpen && activeEntry ? (
+      {isModalOpen && selectedDepartment ? (
         <div className="modal-backdrop" role="presentation" onClick={() => busyKey === "" && setIsModalOpen(false)}>
           <div className="modal-card modal-card-wide" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
             <div className="modal-head">
               <div>
-                <div className="eyebrow">{selectedDestinationOption?.label ?? activeEntry.office}</div>
-                <h3>Confirm {activeEntry.label}</h3>
-                <p>Review the outgoing data below before sending it to the selected destination.</p>
+                <div className="eyebrow">{selectedDepartment.department_name}</div>
+                <h3>Confirm Registrar Department Flow</h3>
+                <p>Review the generated registrar payload before queueing it for the selected connected department.</p>
               </div>
               <button className="secondary compact-button" type="button" onClick={() => setIsModalOpen(false)} disabled={busyKey !== ""}>
                 Close
               </button>
             </div>
 
+            <div className="table-toolbar top-gap">
+              <label className="field">
+                <span className="field-label">Student</span>
+                <select
+                  value={selectedStudentNo}
+                  onChange={(event) => {
+                    const nextStudentNo = event.target.value;
+                    setSelectedStudentNo(nextStudentNo);
+                    void refreshPreview(selectedDepartment, nextStudentNo);
+                  }}
+                >
+                  {students.map((student) => (
+                    <option key={student.id} value={student.student_no}>
+                      {student.student_no} - {student.last_name}, {student.first_name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="field">
+                <span className="field-label">Department</span>
+                <select
+                  value={selectedDepartmentKey}
+                  onChange={(event) => {
+                    const nextDepartmentKey = event.target.value;
+                    setSelectedDepartmentKey(nextDepartmentKey);
+                    const nextDepartment = outgoing.find((item) => item.department_key === nextDepartmentKey) ?? null;
+                    if (nextDepartment) {
+                      void refreshPreview(nextDepartment, selectedStudentNo);
+                    }
+                  }}
+                >
+                  {outgoing.map((department) => (
+                    <option key={department.department_key} value={department.department_key}>
+                      {department.department_name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="field">
+                <span className="field-label">Preview Filter</span>
+                <div className="filter-input-shell">
+                  <span className="filter-icon" aria-hidden="true">
+                    <svg viewBox="0 0 20 20" fill="none">
+                      <path d="M3 5h14l-5.4 6.3v3.9l-3.2 1.8v-5.7L3 5Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+                    </svg>
+                  </span>
+                  <input
+                    value={filterText}
+                    onChange={(event) => setFilterText(event.target.value)}
+                    placeholder="Filter preview rows"
+                  />
+                </div>
+              </label>
+
+              <div className="field">
+                <span className="field-label">Endpoint</span>
+                <div className="status-meta">
+                  <code>{previewState?.endpoint ?? selectedDepartment.dispatch_endpoint}</code>
+                </div>
+              </div>
+            </div>
+
             {previewState ? (
               <>
-                <div className="table-toolbar top-gap">
-                  <label className="field">
-                    <span className="field-label">Student</span>
-                    <select
-                      value={selectedStudentNo}
-                      onChange={(event) => {
-                        const nextStudentNo = event.target.value;
-                        setSelectedStudentNo(nextStudentNo);
-                        if (activeEntry && studentRequiredKeys.has(activeEntry.key)) {
-                          void refreshPreview(activeEntry, nextStudentNo);
-                        }
-                      }}
-                    >
-                      {students.map((student) => (
-                        <option key={student.id} value={student.student_no}>
-                          {student.student_no} - {student.last_name}, {student.first_name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="field">
-                    <span className="field-label">Destination</span>
-                    <select
-                      value={selectedDestination}
-                      onChange={(event) => {
-                        const nextValue = event.target.value;
-                        setSelectedDestination(nextValue);
-                        const nextEntry = destinationOptions.find((option) => option.value === nextValue)?.entry;
-                        if (nextEntry) {
-                          void refreshPreview(nextEntry);
-                        }
-                      }}
-                    >
-                      {destinationOptions.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="field">
-                    <span className="field-label">Preview Filter</span>
-                    <div className="filter-input-shell">
-                      <span className="filter-icon" aria-hidden="true">
-                        <svg viewBox="0 0 20 20" fill="none">
-                          <path d="M3 5h14l-5.4 6.3v3.9l-3.2 1.8v-5.7L3 5Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
-                        </svg>
-                      </span>
-                      <input
-                        value={filterText}
-                        onChange={(event) => setFilterText(event.target.value)}
-                        placeholder="Filter preview rows"
-                      />
-                    </div>
-                  </label>
-                  <div className="field">
-                    <span className="field-label">Endpoint</span>
-                    <div className="status-meta"><code>{previewState.endpoint}</code></div>
+                <div className="panel-stack top-gap">
+                  <div className="status-meta">
+                    <strong>{previewState.targetLabel}</strong> via {previewState.routeLabel}
                   </div>
+                  {previewState.notes.map((note) => (
+                    <div key={note} className="status-meta">{note}</div>
+                  ))}
                 </div>
 
                 <DataTable headers={previewState.columns.map((column) => titleCase(column))}>
@@ -425,8 +464,8 @@ export function IntegrationSendPanel({
               <button className="secondary inline-button" type="button" onClick={() => setIsModalOpen(false)} disabled={busyKey !== ""}>
                 Cancel
               </button>
-              <button className="primary inline-button" type="button" onClick={confirmSend} disabled={busyKey !== ""}>
-                {busyKey === activeEntry.key ? "Sending..." : `Confirm Send`}
+              <button className="primary inline-button" type="button" onClick={confirmSend} disabled={busyKey !== "" || !selectedStudentNo}>
+                {busyKey === selectedDepartment.department_key ? "Queueing..." : "Confirm Queue"}
               </button>
             </div>
           </div>

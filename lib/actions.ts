@@ -368,15 +368,31 @@ export async function createEnrollmentAction(formData: FormData) {
     actorId: user.id
   });
   try {
-    await import("./integration-delivery").then(({ deliverIntegrationResource }) =>
-      deliverIntegrationResource("enrollment-data", { studentId })
+    const flowResult = await import("./department-integration").then(({ dispatchRegistrarDepartmentFlow }) =>
+      dispatchRegistrarDepartmentFlow({
+        targetDepartmentKey: "cashier",
+        studentId
+      })
     );
+
+    if (!flowResult.ok) {
+      await import("./integration-delivery").then(({ deliverIntegrationResource }) =>
+        deliverIntegrationResource("enrollment-data", { studentId })
+      );
+    }
   } catch {
-    // Non-blocking if cashier delivery is not configured yet.
+    try {
+      await import("./integration-delivery").then(({ deliverIntegrationResource }) =>
+        deliverIntegrationResource("enrollment-data", { studentId })
+      );
+    } catch {
+      // Non-blocking if shared or legacy cashier delivery is not configured yet.
+    }
   }
   revalidatePath("/staff/enrollments");
   revalidatePath("/staff/bin");
   revalidatePath("/staff/class-lists");
+  revalidatePath("/admin/integrations");
   revalidateCorePaths();
 }
 

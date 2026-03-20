@@ -6,18 +6,19 @@ import { SectionCard } from "@/components/section-card";
 import { StatusBadge } from "@/components/status-badge";
 import { requireRole } from "@/lib/auth";
 import { createAcademicReportAction, deleteAcademicReportAction, updateAcademicReportAction } from "@/lib/actions";
-import { buildIntegrationManifest } from "@/lib/integration-catalog";
+import { listRegistrarOutgoingDepartments } from "@/lib/department-integration";
 import { listAcademicReports, listStudents } from "@/lib/data";
 
 export default async function AcademicReportsPage() {
   const user = await requireRole("Administrator");
   const [reports, students] = await Promise.all([listAcademicReports(), listStudents()]);
-  const manifest = buildIntegrationManifest("/api/integrations");
-  const academicOutgoing = manifest.outgoing.filter((entry) => entry.key === "student-academic-records");
+  const academicOutgoing = (await listRegistrarOutgoingDepartments()).filter(
+    (entry) => entry.department_key === "guidance"
+  );
 
   return (
     <AppShell user={user} title="Academic Reports" description="Academic report generation and maintenance are now fully handled in TypeScript.">
-      <SectionCard title="Academic Record Integrations" description="Guidance-facing academic record feeds are handled from this page.">
+      <SectionCard title="Academic Record Integrations" description="Queue registrar academic context to Guidance through the shared department flow registry.">
         <IntegrationSendPanel
           students={students as Array<{ id: number; student_no: string; first_name: string; last_name: string }>}
           outgoing={academicOutgoing}
