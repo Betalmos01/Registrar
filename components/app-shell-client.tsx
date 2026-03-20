@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { ReactNode, useState } from "react";
 import logo from "@/lib/Logo/logo.png";
 import { ShellTopbar } from "@/components/shell-topbar";
@@ -9,6 +10,10 @@ import type { SessionUser } from "@/lib/session";
 import type { NavItem } from "@/lib/navigation";
 
 type NavSection = { section: string; items: NavItem[] };
+
+function isActiveRoute(pathname: string, href: string) {
+  return pathname === href || pathname.startsWith(`${href}/`);
+}
 
 function NavIcon({ icon }: { icon: string }) {
   const common = {
@@ -47,6 +52,8 @@ function NavIcon({ icon }: { icon: string }) {
       return <svg {...common}><path d="M7 3h7l5 5v13a1 1 0 0 1-1 1H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z" /><path d="M14 3v5h5" /></svg>;
     case "logs":
       return <svg {...common}><path d="M8 6h13" /><path d="M8 12h13" /><path d="M8 18h13" /><path d="M3 6h.01" /><path d="M3 12h.01" /><path d="M3 18h.01" /></svg>;
+    case "bin":
+      return <svg {...common}><path d="M3 6h18" /><path d="M8 6V4h8v2" /><path d="M19 6l-1 14H6L5 6" /><path d="M10 11v6" /><path d="M14 11v6" /></svg>;
     case "profile":
       return <svg {...common}><circle cx="12" cy="8" r="4" /><path d="M5 20a7 7 0 0 1 14 0" /></svg>;
     case "settings":
@@ -74,6 +81,7 @@ export function AppShellClient({
   unreadCount: number;
 }) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const pathname = usePathname();
 
   return (
     <div className={`app-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
@@ -93,7 +101,13 @@ export function AppShellClient({
                 <div className="nav-heading">{section.section}</div>
                 <div className="nav-list">
                   {section.items.map((item) => (
-                    <Link key={item.href} href={item.href} className="nav-link" title={item.label}>
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      className={`nav-link ${isActiveRoute(pathname, item.href) ? "active" : ""}`}
+                      title={item.label}
+                      aria-current={isActiveRoute(pathname, item.href) ? "page" : undefined}
+                    >
                       <span className="nav-icon"><NavIcon icon={item.icon} /></span>
                       <span className="nav-link-label">{item.label}</span>
                     </Link>

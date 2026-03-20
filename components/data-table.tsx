@@ -22,12 +22,14 @@ export function DataTable({
   headers,
   children,
   pageSize = 8,
-  emptyMessage = "No records available."
+  emptyMessage = "No records available.",
+  showSearch = true
 }: {
   headers: string[];
   children: ReactNode;
   pageSize?: number;
   emptyMessage?: string;
+  showSearch?: boolean;
 }) {
   const rows = useMemo(() => Children.toArray(children), [children]);
   const [search, setSearch] = useState("");
@@ -52,26 +54,28 @@ export function DataTable({
 
   return (
     <div className="dynamic-table">
-      <div className="table-toolbar table-toolbar-inline">
-        <label className="field table-search-field">
-          <span className="field-label">Realtime Search</span>
-          <div className="filter-input-shell">
-            <span className="filter-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M4 6h16" />
-                <path d="M7 12h10" />
-                <path d="M10 18h4" />
-              </svg>
-            </span>
-            <input
-              type="search"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search current table records"
-            />
-          </div>
-        </label>
-      </div>
+      {showSearch ? (
+        <div className="table-toolbar table-toolbar-inline">
+          <label className="field table-search-field">
+            <span className="field-label">Realtime Search</span>
+            <div className="filter-input-shell">
+              <span className="filter-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M4 6h16" />
+                  <path d="M7 12h10" />
+                  <path d="M10 18h4" />
+                </svg>
+              </span>
+              <input
+                type="search"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Search current table records"
+              />
+            </div>
+          </label>
+        </div>
+      ) : null}
 
       <div className="table-shell">
         <table className="data-table">

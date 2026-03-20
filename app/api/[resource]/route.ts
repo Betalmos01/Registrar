@@ -103,10 +103,10 @@ export async function GET(request: Request, context: { params: Promise<{ resourc
 
   try {
     if (slug === "integrations") {
-      const user = await requireIntegrationUser(request);
-      if (!user) return json({ ok: false, error: "Unauthorized." }, 401);
-
       const integrationResource = String(url.searchParams.get("resource") ?? "manifest").toLowerCase();
+      const outgoingMapping = integrationCatalog.find((entry) => entry.direction === "outgoing" && entry.key === integrationResource);
+      const user = outgoingMapping ? await requireIntegrationAccess(request) : await requireIntegrationUser(request);
+      if (!user) return json({ ok: false, error: "Unauthorized." }, 401);
       if (integrationResource === "manifest") {
         return json({ ok: true, data: buildIntegrationManifest("/api/integrations") });
       }
@@ -170,7 +170,7 @@ export async function POST(request: Request, context: { params: Promise<{ resour
       const integrationResource = String(input.resource ?? "").toLowerCase();
       const outgoingMapping = integrationCatalog.find((entry) => entry.direction === "outgoing" && entry.key === integrationResource);
       if (String(input.action ?? "").toLowerCase() === "deliver" && outgoingMapping) {
-        const user = await requireIntegrationUser(request);
+        const user = await requireIntegrationAccess(request);
         if (!user) return json({ ok: false, error: "Unauthorized." }, 401);
 
         const result = await deliverIntegrationResource(integrationResource, {
@@ -211,8 +211,8 @@ export async function POST(request: Request, context: { params: Promise<{ resour
         break;
       case "instructors":
         if (action === "create") return json({ ok: true, data: { id: await createInstructor({ employeeNo: String(input.employee_no ?? ""), firstName: String(input.first_name ?? ""), lastName: String(input.last_name ?? ""), department: String(input.department ?? ""), actorId: user.id }) } });
-        if (action === "update") return json({ ok: true, message: (await updateInstructor({ id: Number(input.id ?? 0), employeeNo: String(input.employee_no ?? ""), firstName: String(input.first_name ?? ""), lastName: String(input.last_name ?? ""), department: String(input.department ?? ""), actorId: user.id }), "Instructor updated.") });
-        if (action === "delete") return json({ ok: true, message: (await deleteInstructor({ id: Number(input.id ?? 0), actorId: user.id }), "Instructor deleted.") });
+        if (action === "update") return json({ ok: true, message: (await updateInstructor({ id: String(input.id ?? ""), employeeNo: String(input.employee_no ?? ""), firstName: String(input.first_name ?? ""), lastName: String(input.last_name ?? ""), department: String(input.department ?? ""), actorId: user.id }), "Instructor updated.") });
+        if (action === "delete") return json({ ok: true, message: (await deleteInstructor({ id: String(input.id ?? ""), actorId: user.id }), "Instructor deleted.") });
         break;
       case "classes":
         if (action === "create") return json({ ok: true, data: { id: await createClassSchedule({ classCode: String(input.class_code ?? ""), title: String(input.class_title ?? ""), course: String(input.course ?? ""), units: Number(input.units ?? 0), day: String(input.day ?? ""), time: String(input.time ?? ""), room: String(input.room ?? ""), actorId: user.id }) } });
@@ -220,8 +220,8 @@ export async function POST(request: Request, context: { params: Promise<{ resour
         if (action === "delete") return json({ ok: true, message: (await deleteClassSchedule({ classId: Number(input.class_id ?? 0), actorId: user.id }), "Class deleted.") });
         break;
       case "enrollments":
-        if (action === "create") return json({ ok: true, data: { id: await createEnrollment({ studentId: Number(input.student_id ?? 0), classId: Number(input.class_id ?? 0), status: String(input.status ?? "Enrolled"), actorId: user.id }) } });
-        if (action === "update") return json({ ok: true, message: (await updateEnrollment({ id: Number(input.id ?? 0), status: String(input.status ?? ""), actorId: user.id }), "Enrollment updated.") });
+        if (action === "create") return json({ ok: true, data: { id: await createEnrollment({ studentId: Number(input.student_id ?? 0), classId: Number(input.class_id ?? 0), status: String(input.status ?? "Enrolled"), academicYear: String(input.academic_year ?? ""), semester: String(input.semester ?? ""), tuitionFee: Number(input.tuition_fee ?? 5000), downpaymentAmount: Number(input.downpayment_amount ?? 0), medicalFee: Number(input.medical_fee ?? 0), idFee: Number(input.id_fee ?? 0), actorId: user.id }) } });
+        if (action === "update") return json({ ok: true, message: (await updateEnrollment({ id: Number(input.id ?? 0), status: String(input.status ?? ""), academicYear: String(input.academic_year ?? ""), semester: String(input.semester ?? ""), tuitionFee: Number(input.tuition_fee ?? 5000), downpaymentAmount: Number(input.downpayment_amount ?? 0), medicalFee: Number(input.medical_fee ?? 0), idFee: Number(input.id_fee ?? 0), actorId: user.id }), "Enrollment updated.") });
         if (action === "delete") return json({ ok: true, message: (await deleteEnrollment({ id: Number(input.id ?? 0), actorId: user.id }), "Enrollment deleted.") });
         break;
       case "grades":

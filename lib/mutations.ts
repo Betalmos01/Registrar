@@ -1,5 +1,5 @@
 import bcrypt from "bcryptjs";
-import { pool, queryOne, queryValue, resolveTableName } from "./db";
+import { hasColumn, pool, queryOne, queryValue, resolveTableName } from "./db";
 import { workflowTemplates } from "./data";
 
 async function requireDocumentsTable() {
@@ -43,7 +43,7 @@ async function requireSchedulesTable() {
 }
 
 async function requireEnrollmentsTable() {
-  const tableName = await resolveTableName("registrar_enrollments", "enrollments");
+  const tableName = await resolveTableName("registrar.enrollments", "registrar_enrollments", "enrollments");
   if (!tableName) {
     throw new Error("The enrollments table has not been created in this database yet.");
   }
@@ -156,9 +156,17 @@ export async function createStudent(input: {
   studentNo: string;
   firstName: string;
   lastName: string;
+  middleName?: string;
   program?: string;
   yearLevel?: string;
   status?: string;
+  birthDate?: string;
+  motherName?: string;
+  fatherName?: string;
+  guardianName?: string;
+  address?: string;
+  email?: string;
+  phone?: string;
   actorId: number;
 }) {
   const studentsTable = await requireStudentsTable();
@@ -167,11 +175,48 @@ export async function createStudent(input: {
     throw new Error("Student No already exists.");
   }
 
+  const optionalColumns = await Promise.all([
+    hasColumn(studentsTable, "middle_name"),
+    hasColumn(studentsTable, "birth_date"),
+    hasColumn(studentsTable, "mother_name"),
+    hasColumn(studentsTable, "father_name"),
+    hasColumn(studentsTable, "guardian_name"),
+    hasColumn(studentsTable, "address"),
+    hasColumn(studentsTable, "email"),
+    hasColumn(studentsTable, "phone")
+  ]);
+
+  const columns = ["student_no", "first_name", "last_name", "program", "year_level", "status", "created_at"];
+  const values: unknown[] = [input.studentNo, input.firstName, input.lastName, input.program ?? "", input.yearLevel ?? "", input.status ?? "Active"];
+  const placeholders = columns.map((_, index) => `$${index + 1}`);
+  placeholders[columns.length - 1] = "current_timestamp";
+
+  const optionalEntries = [
+    { enabled: optionalColumns[0], column: "middle_name", value: input.middleName ?? "" },
+    { enabled: optionalColumns[1], column: "birth_date", value: input.birthDate || null },
+    { enabled: optionalColumns[2], column: "mother_name", value: input.motherName ?? "" },
+    { enabled: optionalColumns[3], column: "father_name", value: input.fatherName ?? "" },
+    { enabled: optionalColumns[4], column: "guardian_name", value: input.guardianName ?? "" },
+    { enabled: optionalColumns[5], column: "address", value: input.address ?? "" },
+    { enabled: optionalColumns[6], column: "email", value: input.email ?? "" },
+    { enabled: optionalColumns[7], column: "phone", value: input.phone ?? "" }
+  ];
+
+  optionalEntries.forEach((entry) => {
+    if (!entry.enabled) return;
+    columns.splice(columns.length - 1, 0, entry.column);
+    values.push(entry.value);
+  });
+
+  const dynamicPlaceholders = columns.map((column, index) =>
+    column === "created_at" ? "current_timestamp" : `$${values.length >= index + 1 ? index + 1 : values.length}`
+  );
+
   const result = await pool.query(
-    `insert into ${studentsTable} (student_no, first_name, last_name, program, year_level, status, created_at)
-     values ($1, $2, $3, $4, $5, $6, current_timestamp)
+    `insert into ${studentsTable} (${columns.join(", ")})
+     values (${dynamicPlaceholders.join(", ")})
      returning id`,
-    [input.studentNo, input.firstName, input.lastName, input.program ?? "", input.yearLevel ?? "", input.status ?? "Active"]
+    values
   );
 
   await logAction(input.actorId, "Create", "Student Records", `Added student ${input.studentNo}`);
@@ -183,9 +228,17 @@ export async function updateStudent(input: {
   studentNo: string;
   firstName: string;
   lastName: string;
+  middleName?: string;
   program?: string;
   yearLevel?: string;
   status?: string;
+  birthDate?: string;
+  motherName?: string;
+  fatherName?: string;
+  guardianName?: string;
+  address?: string;
+  email?: string;
+  phone?: string;
   actorId: number;
 }) {
   const studentsTable = await requireStudentsTable();
@@ -194,11 +247,41 @@ export async function updateStudent(input: {
     throw new Error("Student No already exists.");
   }
 
+  const setClauses = [
+    "student_no = $1",
+    "first_name = $2",
+    "last_name = $3",
+    "program = $4",
+    "year_level = $5",
+    "status = $6"
+  ];
+  const values: unknown[] = [input.studentNo, input.firstName, input.lastName, input.program ?? "", input.yearLevel ?? "", input.status ?? "Active"];
+
+  const optionalEntries = [
+    { column: "middle_name", value: input.middleName ?? "" },
+    { column: "birth_date", value: input.birthDate || null },
+    { column: "mother_name", value: input.motherName ?? "" },
+    { column: "father_name", value: input.fatherName ?? "" },
+    { column: "guardian_name", value: input.guardianName ?? "" },
+    { column: "address", value: input.address ?? "" },
+    { column: "email", value: input.email ?? "" },
+    { column: "phone", value: input.phone ?? "" }
+  ];
+
+  for (const entry of optionalEntries) {
+    if (await hasColumn(studentsTable, entry.column)) {
+      values.push(entry.value);
+      setClauses.push(`${entry.column} = $${values.length}`);
+    }
+  }
+
+  values.push(input.id);
+
   await pool.query(
     `update ${studentsTable}
-     set student_no = $1, first_name = $2, last_name = $3, program = $4, year_level = $5, status = $6
-     where id = $7`,
-    [input.studentNo, input.firstName, input.lastName, input.program ?? "", input.yearLevel ?? "", input.status ?? "Active", input.id]
+     set ${setClauses.join(", ")}
+     where id = $${values.length}`,
+    values
   );
 
   await logAction(input.actorId, "Update", "Student Records", `Updated student ID ${input.id}`);
@@ -217,7 +300,7 @@ export async function createInstructor(input: {
   department?: string;
   actorId: number;
 }) {
-  const instructorsTable = await resolveTableName("registrar_instructors", "instructors");
+  const instructorsTable = await resolveTableName("hr_instructors", "hr.instructors", "registrar_instructors", "registrar.instructors", "instructors");
   if (!instructorsTable) throw new Error("The instructors table has not been created in this database yet.");
   const exists = await queryOne(`select id from ${instructorsTable} where employee_no = $1`, [input.employeeNo]);
   if (exists) {
@@ -232,18 +315,18 @@ export async function createInstructor(input: {
   );
 
   await logAction(input.actorId, "Create", "Instructors", `Added instructor ${input.employeeNo}`);
-  return result.rows[0]?.id as number;
+  return result.rows[0]?.id as string | number;
 }
 
 export async function updateInstructor(input: {
-  id: number;
+  id: string | number;
   employeeNo: string;
   firstName: string;
   lastName: string;
   department?: string;
   actorId: number;
 }) {
-  const instructorsTable = await resolveTableName("registrar_instructors", "instructors");
+  const instructorsTable = await resolveTableName("hr_instructors", "hr.instructors", "registrar_instructors", "registrar.instructors", "instructors");
   if (!instructorsTable) throw new Error("The instructors table has not been created in this database yet.");
   const exists = await queryOne(`select id from ${instructorsTable} where employee_no = $1 and id <> $2`, [input.employeeNo, input.id]);
   if (exists) {
@@ -258,11 +341,36 @@ export async function updateInstructor(input: {
   await logAction(input.actorId, "Update", "Instructors", `Updated instructor ID ${input.id}`);
 }
 
-export async function deleteInstructor(input: { id: number; actorId: number }) {
-  const instructorsTable = await resolveTableName("registrar_instructors", "instructors");
+export async function deleteInstructor(input: { id: string | number; actorId: number }) {
+  const instructorsTable = await resolveTableName("hr_instructors", "hr.instructors", "registrar_instructors", "registrar.instructors", "instructors");
   if (!instructorsTable) throw new Error("The instructors table has not been created in this database yet.");
   await pool.query(`delete from ${instructorsTable} where id = $1`, [input.id]);
   await logAction(input.actorId, "Delete", "Instructors", `Deleted instructor ID ${input.id}`);
+}
+
+export async function assignInstructorClass(input: {
+  employeeNo: string;
+  classId: number;
+  actorId: number;
+}) {
+  const assignmentsTable = await resolveTableName(
+    "registrar_instructor_class_assignments",
+    "registrar.instructor_class_assignments",
+    "instructor_class_assignments"
+  );
+  if (!assignmentsTable) {
+    throw new Error("The instructor class assignments table has not been created in this database yet.");
+  }
+
+  await pool.query(
+    `insert into ${assignmentsTable} (instructor_employee_no, class_id, assigned_at, assigned_by)
+     values ($1, $2, current_timestamp, $3)
+     on conflict (instructor_employee_no, class_id)
+     do update set assigned_at = current_timestamp, assigned_by = excluded.assigned_by`,
+    [input.employeeNo, input.classId, input.actorId]
+  );
+
+  await logAction(input.actorId, "Assign", "Instructors", `Assigned class ID ${input.classId} to instructor ${input.employeeNo}`);
 }
 
 export async function createClassSchedule(input: {
@@ -354,33 +462,139 @@ export async function deleteClassSchedule(input: { classId: number; actorId: num
   await logAction(input.actorId, "Delete", "Classes & Schedules", `Deleted class ID ${input.classId}`);
 }
 
+export async function createClassList(input: { classId: number; actorId: number }) {
+  const classListsTable = await resolveTableName("registrar_class_lists", "registrar.class_lists", "class_lists");
+  if (!classListsTable) {
+    throw new Error("The class lists table has not been created in this database yet.");
+  }
+
+  await pool.query(
+    `insert into ${classListsTable} (class_id, published_at, published_by)
+     values ($1, current_timestamp, $2)
+     on conflict (class_id) do nothing`,
+    [input.classId, input.actorId]
+  );
+
+  await logAction(input.actorId, "Create", "Class Lists", `Published class list for class ID ${input.classId}`);
+}
+
 export async function createEnrollment(input: {
   studentId: number;
   classId: number;
   status?: string;
+  academicYear?: string;
+  semester?: string;
+  tuitionFee?: number;
+  downpaymentAmount?: number;
+  medicalFee?: number;
+  idFee?: number;
   actorId: number;
 }) {
   const enrollmentsTable = await requireEnrollmentsTable();
+  const optionalColumns = await Promise.all([
+    hasColumn(enrollmentsTable, "academic_year"),
+    hasColumn(enrollmentsTable, "semester"),
+    hasColumn(enrollmentsTable, "tuition_fee"),
+    hasColumn(enrollmentsTable, "downpayment_amount"),
+    hasColumn(enrollmentsTable, "medical_fee"),
+    hasColumn(enrollmentsTable, "id_fee")
+  ]);
+  const columns = ["student_id", "class_id", "status", "created_at"];
+  const values: unknown[] = [input.studentId, input.classId, input.status ?? "Enrolled"];
+  const optionalEntries = [
+    { enabled: optionalColumns[0], column: "academic_year", value: input.academicYear ?? "" },
+    { enabled: optionalColumns[1], column: "semester", value: input.semester ?? "" },
+    { enabled: optionalColumns[2], column: "tuition_fee", value: input.tuitionFee ?? 5000 },
+    { enabled: optionalColumns[3], column: "downpayment_amount", value: input.downpaymentAmount ?? 0 },
+    { enabled: optionalColumns[4], column: "medical_fee", value: input.medicalFee ?? 0 },
+    { enabled: optionalColumns[5], column: "id_fee", value: input.idFee ?? 0 }
+  ];
+  optionalEntries.forEach((entry) => {
+    if (!entry.enabled) return;
+    columns.splice(columns.length - 1, 0, entry.column);
+    values.push(entry.value);
+  });
+  const placeholders = columns.map((column, index) => (column === "created_at" ? "current_timestamp" : `$${index + 1}`));
   const result = await pool.query(
-    `insert into ${enrollmentsTable} (student_id, class_id, status, created_at)
-     values ($1, $2, $3, current_timestamp)
+    `insert into ${enrollmentsTable} (${columns.join(", ")})
+     values (${placeholders.join(", ")})
      returning id`,
-    [input.studentId, input.classId, input.status ?? "Enrolled"]
+    values
   );
   await logAction(input.actorId, "Create", "Enrollment", `Enrolled student ID ${input.studentId} to class ID ${input.classId}`);
   return result.rows[0]?.id as number;
 }
 
-export async function updateEnrollment(input: { id: number; status: string; actorId: number }) {
+export async function updateEnrollment(input: {
+  id: number;
+  status: string;
+  academicYear?: string;
+  semester?: string;
+  tuitionFee?: number;
+  downpaymentAmount?: number;
+  medicalFee?: number;
+  idFee?: number;
+  actorId: number;
+}) {
   const enrollmentsTable = await requireEnrollmentsTable();
-  await pool.query(`update ${enrollmentsTable} set status = $1 where id = $2`, [input.status, input.id]);
+  const setClauses = ["status = $1"];
+  const values: unknown[] = [input.status];
+  const optionalEntries = [
+    { column: "academic_year", value: input.academicYear ?? "" },
+    { column: "semester", value: input.semester ?? "" },
+    { column: "tuition_fee", value: input.tuitionFee ?? 5000 },
+    { column: "downpayment_amount", value: input.downpaymentAmount ?? 0 },
+    { column: "medical_fee", value: input.medicalFee ?? 0 },
+    { column: "id_fee", value: input.idFee ?? 0 }
+  ];
+  for (const entry of optionalEntries) {
+    if (await hasColumn(enrollmentsTable, entry.column)) {
+      values.push(entry.value);
+      setClauses.push(`${entry.column} = $${values.length}`);
+    }
+  }
+  values.push(input.id);
+  await pool.query(`update ${enrollmentsTable} set ${setClauses.join(", ")} where id = $${values.length}`, values);
   await logAction(input.actorId, "Update", "Enrollment", `Updated enrollment ID ${input.id}`);
 }
 
 export async function deleteEnrollment(input: { id: number; actorId: number }) {
   const enrollmentsTable = await requireEnrollmentsTable();
+  const hasDeletedAt = await hasColumn(enrollmentsTable, "deleted_at");
+  if (hasDeletedAt) {
+    const hasDeletedBy = await hasColumn(enrollmentsTable, "deleted_by");
+    await pool.query(
+      `update ${enrollmentsTable}
+       set deleted_at = current_timestamp${hasDeletedBy ? ", deleted_by = $2" : ""}
+       where id = $1`,
+      hasDeletedBy ? [input.id, input.actorId] : [input.id]
+    );
+    await logAction(input.actorId, "Delete", "Enrollment", `Moved enrollment ID ${input.id} to bin`);
+    return;
+  }
   await pool.query(`delete from ${enrollmentsTable} where id = $1`, [input.id]);
   await logAction(input.actorId, "Delete", "Enrollment", `Deleted enrollment ID ${input.id}`);
+}
+
+export async function restoreEnrollment(input: { id: number; actorId: number }) {
+  const enrollmentsTable = await requireEnrollmentsTable();
+  if (!(await hasColumn(enrollmentsTable, "deleted_at"))) {
+    throw new Error("Recycle bin is not available for enrollments in this database yet.");
+  }
+  const hasDeletedBy = await hasColumn(enrollmentsTable, "deleted_by");
+  await pool.query(
+    `update ${enrollmentsTable}
+     set deleted_at = null${hasDeletedBy ? ", deleted_by = null" : ""}
+     where id = $1`,
+    [input.id]
+  );
+  await logAction(input.actorId, "Restore", "Enrollment", `Restored enrollment ID ${input.id} from bin`);
+}
+
+export async function purgeEnrollment(input: { id: number; actorId: number }) {
+  const enrollmentsTable = await requireEnrollmentsTable();
+  await pool.query(`delete from ${enrollmentsTable} where id = $1`, [input.id]);
+  await logAction(input.actorId, "Delete", "Enrollment", `Permanently deleted enrollment ID ${input.id}`);
 }
 
 export async function createGrade(input: {

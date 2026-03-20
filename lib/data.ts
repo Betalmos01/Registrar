@@ -1,4 +1,4 @@
-import { hasTable, query, queryOne, queryValue, resolveTableName } from "./db";
+import { hasColumn, hasTable, query, queryOne, queryValue, resolveTableName } from "./db";
 
 export type AppRole = "admin" | "staff";
 
@@ -126,11 +126,23 @@ async function getStudentsTable() {
 }
 
 async function getInstructorsTable() {
-  return resolveTableName("registrar_instructors", "instructors");
+  return resolveTableName("hr_instructors", "hr.instructors", "registrar_instructors", "registrar.instructors", "instructors");
+}
+
+async function getInstructorAssignmentsTable() {
+  return resolveTableName(
+    "registrar_instructor_class_assignments",
+    "registrar.instructor_class_assignments",
+    "instructor_class_assignments"
+  );
 }
 
 async function getClassesTable() {
   return resolveTableName("registrar_classes", "classes");
+}
+
+async function getClassListsTable() {
+  return resolveTableName("registrar_class_lists", "registrar.class_lists", "class_lists");
 }
 
 async function getSchedulesTable() {
@@ -138,7 +150,7 @@ async function getSchedulesTable() {
 }
 
 async function getEnrollmentsTable() {
-  return resolveTableName("registrar_enrollments", "enrollments");
+  return resolveTableName("registrar.enrollments", "registrar_enrollments", "enrollments");
 }
 
 async function getGradesTable() {
@@ -216,11 +228,302 @@ export async function listStudents(search = "", program = "", year = "") {
     conditions.push(`year_level = $${params.length}`);
   }
 
-  return query(
-    `select * from ${studentsTable} ${conditions.length ? `where ${conditions.join(" and ")}` : ""}
-     order by last_name, first_name, student_no`,
-    params
+  const students = await query<any>(
+      `select * from ${studentsTable} ${conditions.length ? `where ${conditions.join(" and ")}` : ""}
+       order by last_name, first_name, student_no`,
+      params
+    );
+
+  if (students.length === 0) {
+    return students;
+  }
+
+  const paymentStatuses = await getStudentPaymentStatuses(
+    students.map((student) => ({
+      id: Number(student.id),
+      student_no: String(student.student_no ?? "")
+    }))
   );
+  const incomingStatuses = await getStudentIncomingIntegrationStatuses(
+    students.map((student) => ({
+      id: Number(student.id)
+    }))
+  );
+  const incomingDetails = await getStudentIncomingIntegrationDetails(
+    students.map((student) => ({
+      id: Number(student.id)
+    }))
+  );
+
+  return students.map((student) => ({
+    ...student,
+    payment_status: paymentStatuses.get(String(student.student_no ?? "").trim()) ?? "Pending",
+    ...(incomingStatuses.get(Number(student.id)) ?? {
+      medical_clearance_status: "Pending",
+      counseling_report_status: "Pending",
+      discipline_record_status: "Pending",
+      activity_participation_status: "Pending"
+    }),
+    ...(incomingDetails.get(Number(student.id)) ?? {})
+  }));
+  }
+
+function normalizePaymentStatus(status: string | null | undefined) {
+  const normalized = String(status ?? "").trim().toLowerCase();
+
+  if (!normalized) {
+    return "Pending";
+  }
+  if (["paid", "verified", "completed", "settled", "cleared"].includes(normalized)) {
+    return "Paid";
+  }
+  if (["rejected", "failed", "unpaid", "declined"].includes(normalized)) {
+    return "Unpaid";
+  }
+
+  return normalized === "submitted" ? "Pending" : normalized.replace(/\b\w/g, (value) => value.toUpperCase());
+}
+
+async function getStudentPaymentStatuses(students: Array<{ id: number; student_no: string }>) {
+  const paymentMap = new Map<string, string>();
+  const studentNos = students.map((student) => student.student_no).filter(Boolean);
+  const studentIds = students.map((student) => student.id).filter((value) => Number.isFinite(value));
+
+  if (studentNos.length === 0) {
+    return paymentMap;
+  }
+
+  const [paymentLinksTable, paymentEventsTable, integrationRecordsTable] = await Promise.all([
+    resolveTableName("registrar.cashier_payment_links", "cashier_payment_links"),
+    resolveTableName("registrar.cashier_integration_events", "cashier_integration_events"),
+    resolveTableName("integration_records")
+  ]);
+
+  if (paymentLinksTable) {
+    const rows = await query<{ source_key: string; payment_status: string }>(
+      `select distinct on (source_key) source_key, payment_status
+       from ${paymentLinksTable}
+       where source_key = any($1)
+       order by source_key, coalesce(cashier_verified_at, paid_at, updated_at, created_at) desc nulls last`,
+      [studentNos]
+    );
+
+    rows.forEach((row) => {
+      paymentMap.set(String(row.source_key), normalizePaymentStatus(row.payment_status));
+    });
+  }
+
+  if (paymentEventsTable) {
+    const rows = await query<{ source_key: string; payment_status: string }>(
+      `select distinct on (source_key) source_key, payment_status
+       from ${paymentEventsTable}
+       where source_key = any($1)
+       order by source_key, coalesce(synced_at, updated_at, created_at) desc nulls last`,
+      [studentNos]
+    );
+
+    rows.forEach((row) => {
+      if (!paymentMap.has(String(row.source_key))) {
+        paymentMap.set(String(row.source_key), normalizePaymentStatus(row.payment_status));
+      }
+    });
+  }
+
+  if (integrationRecordsTable && studentIds.length > 0) {
+    const rows = await query<{ student_id: number; external_status: string }>(
+      `select distinct on (student_id) student_id, external_status
+       from ${integrationRecordsTable}
+       where record_type = 'payment_confirmation'
+         and student_id = any($1)
+       order by student_id, received_at desc nulls last, created_at desc nulls last`,
+      [studentIds]
+    );
+
+    const studentNoById = new Map(students.map((student) => [student.id, student.student_no]));
+
+    rows.forEach((row) => {
+      const studentNo = studentNoById.get(Number(row.student_id));
+      if (studentNo && !paymentMap.has(studentNo)) {
+        paymentMap.set(studentNo, normalizePaymentStatus(row.external_status));
+      }
+    });
+  }
+
+  return paymentMap;
+}
+
+function formatIntegrationStatus(value: string | null | undefined) {
+  const normalized = String(value ?? "").trim();
+  return normalized ? normalized.replace(/\b\w/g, (part) => part.toUpperCase()) : "Pending";
+}
+
+async function getStudentIncomingIntegrationStatuses(students: Array<{ id: number }>) {
+  const statusMap = new Map<
+    number,
+    {
+      medical_clearance_status: string;
+      counseling_report_status: string;
+      discipline_record_status: string;
+      activity_participation_status: string;
+    }
+  >();
+  const integrationRecordsTable = await resolveTableName("integration_records");
+
+  if (!integrationRecordsTable || students.length === 0) {
+    return statusMap;
+  }
+
+  const studentIds = students.map((student) => student.id).filter((value) => Number.isFinite(value));
+  if (studentIds.length === 0) {
+    return statusMap;
+  }
+
+  const rows = await query<{ student_id: number; record_type: string; external_status: string }>(
+    `select distinct on (student_id, record_type) student_id, record_type, external_status
+     from ${integrationRecordsTable}
+     where student_id = any($1)
+       and record_type = any($2)
+     order by student_id, record_type, received_at desc nulls last, created_at desc nulls last`,
+    [
+      studentIds,
+      ["medical_clearance", "counseling_report", "discipline_record", "activity_participation_record"]
+    ]
+  );
+
+  rows.forEach((row) => {
+    const current = statusMap.get(Number(row.student_id)) ?? {
+      medical_clearance_status: "Pending",
+      counseling_report_status: "Pending",
+      discipline_record_status: "Pending",
+      activity_participation_status: "Pending"
+    };
+    const status = formatIntegrationStatus(row.external_status);
+
+    if (row.record_type === "medical_clearance") {
+      current.medical_clearance_status = status;
+    }
+    if (row.record_type === "counseling_report") {
+      current.counseling_report_status = status;
+    }
+    if (row.record_type === "discipline_record") {
+      current.discipline_record_status = status;
+    }
+    if (row.record_type === "activity_participation_record") {
+      current.activity_participation_status = status;
+    }
+
+    statusMap.set(Number(row.student_id), current);
+  });
+
+  return statusMap;
+}
+
+async function getStudentIncomingIntegrationDetails(students: Array<{ id: number }>) {
+  const detailMap = new Map<
+    number,
+    {
+      medical_clearance_record?: {
+        source_office: string;
+        reference_no: string;
+        external_status: string;
+        title: string;
+        notes: string;
+        received_at: string | null;
+      };
+      counseling_report_record?: {
+        source_office: string;
+        reference_no: string;
+        external_status: string;
+        title: string;
+        notes: string;
+        received_at: string | null;
+      };
+      discipline_record_record?: {
+        source_office: string;
+        reference_no: string;
+        external_status: string;
+        title: string;
+        notes: string;
+        received_at: string | null;
+      };
+      activity_participation_record_record?: {
+        source_office: string;
+        reference_no: string;
+        external_status: string;
+        title: string;
+        notes: string;
+        received_at: string | null;
+      };
+    }
+  >();
+  const integrationRecordsTable = await resolveTableName("integration_records");
+
+  if (!integrationRecordsTable || students.length === 0) {
+    return detailMap;
+  }
+
+  const studentIds = students.map((student) => student.id).filter((value) => Number.isFinite(value));
+  if (studentIds.length === 0) {
+    return detailMap;
+  }
+
+  const rows = await query<{
+    student_id: number;
+    record_type: string;
+    source_office: string;
+    reference_no: string;
+    external_status: string;
+    title: string;
+    notes: string;
+    received_at: string | null;
+  }>(
+    `select distinct on (student_id, record_type)
+            student_id,
+            record_type,
+            source_office,
+            reference_no,
+            external_status,
+            title,
+            notes,
+            received_at
+     from ${integrationRecordsTable}
+     where student_id = any($1)
+       and record_type = any($2)
+     order by student_id, record_type, received_at desc nulls last, created_at desc nulls last`,
+    [
+      studentIds,
+      ["medical_clearance", "counseling_report", "discipline_record", "activity_participation_record"]
+    ]
+  );
+
+  rows.forEach((row) => {
+    const current = detailMap.get(Number(row.student_id)) ?? {};
+    const detail = {
+      source_office: row.source_office ?? "",
+      reference_no: row.reference_no ?? "",
+      external_status: formatIntegrationStatus(row.external_status),
+      title: row.title ?? "",
+      notes: row.notes ?? "",
+      received_at: row.received_at ?? null
+    };
+
+    if (row.record_type === "medical_clearance") {
+      current.medical_clearance_record = detail;
+    }
+    if (row.record_type === "counseling_report") {
+      current.counseling_report_record = detail;
+    }
+    if (row.record_type === "discipline_record") {
+      current.discipline_record_record = detail;
+    }
+    if (row.record_type === "activity_participation_record") {
+      current.activity_participation_record_record = detail;
+    }
+
+    detailMap.set(Number(row.student_id), current);
+  });
+
+  return detailMap;
 }
 
 export async function getStudentFilters() {
@@ -244,22 +547,103 @@ export async function getStudentFilters() {
   };
 }
 
+export async function getNextStudentNumber() {
+  const studentsTable = await getStudentsTable();
+  const currentYear = new Date().getFullYear();
+
+  if (!studentsTable) {
+    return `${currentYear}-0001`;
+  }
+
+  const latest = await queryOne<{ student_no: string }>(
+    `select student_no
+     from ${studentsTable}
+     where student_no ~ $1
+     order by student_no desc
+     limit 1`,
+    [`^${currentYear}-[0-9]+$`]
+  );
+
+  if (!latest?.student_no) {
+    return `${currentYear}-0001`;
+  }
+
+  const match = latest.student_no.match(/^(\d{4})-(\d+)$/);
+  if (!match) {
+    return `${currentYear}-0001`;
+  }
+
+  const nextNumber = String(Number(match[2]) + 1).padStart(Math.max(match[2].length, 4), "0");
+  return `${match[1]}-${nextNumber}`;
+}
+
 export async function listInstructors(search = "") {
   const instructorsTable = await getInstructorsTable();
   if (!instructorsTable) {
     return [];
   }
 
-  if (search.trim()) {
-    return query(
-      `select * from ${instructorsTable}
+  const baseRows = search.trim()
+    ? await query<{
+        id: string | number;
+        employee_no: string;
+        first_name: string;
+        last_name: string;
+        department: string | null;
+      }>(
+      `select id, employee_no, first_name, last_name, department
+       from ${instructorsTable}
        where employee_no ilike $1 or first_name ilike $1 or last_name ilike $1 or department ilike $1
        order by last_name, first_name`,
       [`%${search.trim()}%`]
-    );
+    )
+    : await query<{
+        id: string | number;
+        employee_no: string;
+        first_name: string;
+        last_name: string;
+        department: string | null;
+      }>(`select id, employee_no, first_name, last_name, department from ${instructorsTable} order by last_name, first_name`);
+
+  if (baseRows.length === 0) {
+    return baseRows;
   }
 
-  return query(`select * from ${instructorsTable} order by last_name, first_name`);
+  const assignmentsTable = await getInstructorAssignmentsTable();
+  const classesTable = await getClassesTable();
+  const employeeNos = baseRows.map((row) => row.employee_no).filter(Boolean);
+  const assignmentMap = new Map<string, Array<{ class_id: number; class_code: string; title: string }>>();
+
+  if (assignmentsTable && classesTable && employeeNos.length > 0) {
+    const assignments = await query<{
+      instructor_employee_no: string;
+      class_id: number;
+      class_code: string;
+      title: string;
+    }>(
+      `select assignments.instructor_employee_no, classes.id as class_id, classes.class_code, classes.title
+       from ${assignmentsTable} as assignments
+       join ${classesTable} as classes on classes.id = assignments.class_id
+       where assignments.instructor_employee_no = any($1)
+       order by classes.class_code`,
+      [employeeNos]
+    );
+
+    assignments.forEach((assignment) => {
+      const current = assignmentMap.get(assignment.instructor_employee_no) ?? [];
+      current.push({
+        class_id: Number(assignment.class_id),
+        class_code: assignment.class_code,
+        title: assignment.title
+      });
+      assignmentMap.set(assignment.instructor_employee_no, current);
+    });
+  }
+
+  return baseRows.map((row) => ({
+    ...row,
+    assigned_classes: assignmentMap.get(row.employee_no) ?? []
+  }));
 }
 
 export async function listClasses(course = "") {
@@ -374,20 +758,58 @@ export async function getClassRoster(classId: number) {
 export async function listClassListSummary(search = "") {
   const classesTable = await getClassesTable();
   const enrollmentsTable = await getEnrollmentsTable();
+  const classListsTable = await getClassListsTable();
+  const schedulesTable = await getSchedulesTable();
   if (!classesTable || !enrollmentsTable) {
     return [];
   }
 
+  const sourceTable = classListsTable ? `${classListsTable} as class_lists` : `${classesTable} as class_lists`;
+  const classJoin = classListsTable ? "class_lists.class_id" : "class_lists.id";
+  const params = search.trim() ? [`%${search.trim()}%`] : [];
+
   return query(
-    `select classes.id, classes.class_code, classes.title,
+    `select classes.id,
+            classes.class_code,
+            classes.title,
+            classes.course,
+            schedules.day,
+            schedules.time,
+            schedules.room,
             sum(case when enrollments.status = 'Enrolled' then 1 else 0 end) as enrolled_students,
             count(enrollments.id) as total_students
-     from ${classesTable} as classes
+     from ${sourceTable}
+     join ${classesTable} as classes on classes.id = ${classJoin}
+     left join ${schedulesTable} as schedules on schedules.class_id = classes.id
      left join ${enrollmentsTable} as enrollments on classes.id = enrollments.class_id
      ${search.trim() ? "where classes.class_code ilike $1 or classes.title ilike $1" : ""}
-     group by classes.id
+     group by classes.id, classes.class_code, classes.title, classes.course, schedules.day, schedules.time, schedules.room
      order by classes.class_code`,
-    search.trim() ? [`%${search.trim()}%`] : []
+    params
+  );
+}
+
+export async function listAvailableClassesForClassLists() {
+  const classesTable = await getClassesTable();
+  const classListsTable = await getClassListsTable();
+  if (!classesTable) {
+    return [];
+  }
+
+  if (!classListsTable) {
+    return query<{ id: number; class_code: string; title: string }>(
+      `select id, class_code, title
+       from ${classesTable}
+       order by class_code`
+    );
+  }
+
+  return query<{ id: number; class_code: string; title: string }>(
+    `select classes.id, classes.class_code, classes.title
+     from ${classesTable} as classes
+     left join ${classListsTable} as class_lists on class_lists.class_id = classes.id
+     where class_lists.class_id is null
+     order by classes.class_code`
   );
 }
 
@@ -399,14 +821,52 @@ export async function listEnrollments() {
     return [];
   }
 
+  const hasDeletedAt = await hasColumn(enrollmentsTable, "deleted_at");
   return query(
     `select enrollments.id, enrollments.student_id, enrollments.class_id, enrollments.status, enrollments.created_at,
+            ${await hasColumn(enrollmentsTable, "academic_year") ? "enrollments.academic_year," : "'' as academic_year,"}
+            ${await hasColumn(enrollmentsTable, "semester") ? "enrollments.semester," : "'' as semester,"}
+            ${await hasColumn(enrollmentsTable, "tuition_fee") ? "enrollments.tuition_fee," : "0::numeric as tuition_fee,"}
+            ${await hasColumn(enrollmentsTable, "downpayment_amount") ? "enrollments.downpayment_amount," : "0::numeric as downpayment_amount,"}
+            ${await hasColumn(enrollmentsTable, "medical_fee") ? "enrollments.medical_fee," : "0::numeric as medical_fee,"}
+            ${await hasColumn(enrollmentsTable, "id_fee") ? "enrollments.id_fee," : "0::numeric as id_fee,"}
             students.student_no, students.first_name, students.last_name,
             classes.class_code, classes.title
      from ${enrollmentsTable} as enrollments
      join ${studentsTable} as students on students.id = enrollments.student_id
      join ${classesTable} as classes on classes.id = enrollments.class_id
+     ${hasDeletedAt ? "where enrollments.deleted_at is null" : ""}
      order by enrollments.created_at desc`
+  );
+}
+
+export async function listEnrollmentBin() {
+  const enrollmentsTable = await getEnrollmentsTable();
+  const studentsTable = await getStudentsTable();
+  const classesTable = await getClassesTable();
+  if (!enrollmentsTable || !studentsTable || !classesTable) {
+    return [];
+  }
+  if (!(await hasColumn(enrollmentsTable, "deleted_at"))) {
+    return [];
+  }
+
+  return query(
+    `select enrollments.id, enrollments.student_id, enrollments.class_id, enrollments.status, enrollments.created_at,
+            enrollments.deleted_at,
+            ${await hasColumn(enrollmentsTable, "academic_year") ? "enrollments.academic_year," : "'' as academic_year,"}
+            ${await hasColumn(enrollmentsTable, "semester") ? "enrollments.semester," : "'' as semester,"}
+            ${await hasColumn(enrollmentsTable, "tuition_fee") ? "enrollments.tuition_fee," : "0::numeric as tuition_fee,"}
+            ${await hasColumn(enrollmentsTable, "downpayment_amount") ? "enrollments.downpayment_amount," : "0::numeric as downpayment_amount,"}
+            ${await hasColumn(enrollmentsTable, "medical_fee") ? "enrollments.medical_fee," : "0::numeric as medical_fee,"}
+            ${await hasColumn(enrollmentsTable, "id_fee") ? "enrollments.id_fee," : "0::numeric as id_fee,"}
+            students.student_no, students.first_name, students.last_name,
+            classes.class_code, classes.title
+     from ${enrollmentsTable} as enrollments
+     join ${studentsTable} as students on students.id = enrollments.student_id
+     join ${classesTable} as classes on classes.id = enrollments.class_id
+     where enrollments.deleted_at is not null
+     order by enrollments.deleted_at desc nulls last, enrollments.created_at desc`
   );
 }
 
@@ -664,12 +1124,18 @@ export async function getUserProfile(userId: number) {
     };
   }
 
+  const usersTable = await getUsersTable();
+  const rolesTable = await getRolesTable();
+  if (!usersTable || !rolesTable) {
+    return null;
+  }
+
   return queryOne(
     `select users.id, users.username, users.first_name, users.last_name, users.display_name,
             users.profile_photo, users.profile_title, users.profile_bio, users.profile_accent,
             roles.name as role
-     from users
-     join roles on roles.id = users.role_id
+     from ${usersTable} as users
+     join ${rolesTable} as roles on roles.id = users.role_id
      where users.id = $1
      limit 1`,
     [userId]
@@ -744,15 +1210,17 @@ export async function getExportRows(workflowKey = "") {
       return {
         title: workflowTemplates[workflowKey].title,
         columns: ["Student No", "Name", "Program", "Year", "Status"],
-        rows: await query(
-          `select student_no,
-                  concat(last_name, ', ', first_name) as full_name,
-                  program,
-                  year_level,
-                  status
-           from students
-           order by last_name, first_name`
-        )
+        rows: exportStudentsTable
+          ? await query(
+              `select student_no,
+                      concat(last_name, ', ', first_name) as full_name,
+                      program,
+                      year_level,
+                      status
+               from ${exportStudentsTable}
+               order by last_name, first_name`
+            )
+          : []
       };
     case "class-planning":
       return {

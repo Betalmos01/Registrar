@@ -3,6 +3,7 @@ import { env } from "./env";
 
 const globalForDb = globalThis as typeof globalThis & { pool?: Pool };
 const tableExistsCache = new Map<string, boolean>();
+const columnExistsCache = new Map<string, boolean>();
 
 export const pool =
   globalForDb.pool ??
@@ -43,7 +44,8 @@ export async function queryValue<T = unknown>(
 }
 
 export async function hasTable(tableName: string, schema = "public"): Promise<boolean> {
-  const cacheKey = `${schema}.${tableName}`;
+  const qualifiedName = tableName.includes(".") ? tableName : `${schema}.${tableName}`;
+  const cacheKey = qualifiedName;
   const cached = tableExistsCache.get(cacheKey);
   if (typeof cached === "boolean") {
     return cached;
@@ -51,7 +53,7 @@ export async function hasTable(tableName: string, schema = "public"): Promise<bo
 
   const exists = await queryValue<string>(
     "select to_regclass($1) as table_name",
-    [`${schema}.${tableName}`]
+    [qualifiedName]
   );
   const present = Boolean(exists);
   tableExistsCache.set(cacheKey, present);
@@ -66,4 +68,28 @@ export async function resolveTableName(...tableNames: string[]): Promise<string 
   }
 
   return null;
+}
+
+export async function hasColumn(tableName: string, columnName: string, schema = "public"): Promise<boolean> {
+  const [resolvedSchema, resolvedTable] = tableName.includes(".")
+    ? tableName.split(".", 2)
+    : [schema, tableName];
+  const cacheKey = `${resolvedSchema}.${resolvedTable}.${columnName}`;
+  const cached = columnExistsCache.get(cacheKey);
+  if (typeof cached === "boolean") {
+    return cached;
+  }
+
+  const exists = await queryValue<string>(
+    `select column_name
+     from information_schema.columns
+     where table_schema = $1
+       and table_name = $2
+       and column_name = $3
+     limit 1`,
+    [resolvedSchema, resolvedTable, columnName]
+  );
+  const present = Boolean(exists);
+  columnExistsCache.set(cacheKey, present);
+  return present;
 }

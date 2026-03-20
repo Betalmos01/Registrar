@@ -26,6 +26,24 @@ type PreviewState = {
   raw: string;
 };
 
+type DestinationOption = {
+  value: string;
+  label: string;
+  entry: OutgoingEntry;
+};
+
+function normalizeConsumerLabel(value: string) {
+  if (value === "PrefectManagementsSystem") {
+    return "Prefect";
+  }
+
+  if (value === "CRADManagement") {
+    return "CRAD";
+  }
+
+  return value;
+}
+
 function titleCase(value: string) {
   return value
     .replace(/_/g, " ")
@@ -106,14 +124,43 @@ export function IntegrationSendPanel({
   const [selectedStudentNo, setSelectedStudentNo] = useState(students[0]?.student_no ?? "");
   const [busyKey, setBusyKey] = useState("");
   const [responseText, setResponseText] = useState("Choose an outgoing feed and click Send to open a confirmation preview.");
-  const [activeEntry, setActiveEntry] = useState<OutgoingEntry | null>(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
   const [previewState, setPreviewState] = useState<PreviewState | null>(null);
   const [filterText, setFilterText] = useState("");
+  const destinationOptions = useMemo<DestinationOption[]>(
+    () =>
+      outgoing.flatMap((entry) => {
+        const seen = new Set<string>();
+
+        return entry.consumers.flatMap((consumer) => {
+          const normalizedConsumer = normalizeConsumerLabel(consumer);
+
+          if (seen.has(normalizedConsumer)) {
+            return [];
+          }
+
+          seen.add(normalizedConsumer);
+
+          return {
+            value: `${entry.key}:${normalizedConsumer}`,
+            label: normalizedConsumer,
+            entry
+          };
+        });
+      }),
+    [outgoing]
+  );
+  const [selectedDestination, setSelectedDestination] = useState(destinationOptions[0]?.value ?? "");
 
   const studentRequiredKeys = useMemo(
     () => new Set(["enrollment-data", "student-personal-info", "student-academic-records"]),
     []
   );
+  const selectedDestinationOption = useMemo(
+    () => destinationOptions.find((option) => option.value === selectedDestination) ?? destinationOptions[0] ?? null,
+    [destinationOptions, selectedDestination]
+  );
+  const activeEntry = selectedDestinationOption?.entry ?? null;
 
   const studentListPreview = useMemo<PreviewState>(
     () => ({
@@ -137,12 +184,12 @@ export function IntegrationSendPanel({
     [students]
   );
 
-  async function fetchPayload(entry: OutgoingEntry) {
+  async function fetchPayload(entry: OutgoingEntry, studentNo = selectedStudentNo) {
     const requiresStudent = studentRequiredKeys.has(entry.key);
     const url = new URL(entry.path, window.location.origin);
 
-    if (requiresStudent && selectedStudentNo) {
-      url.searchParams.set("student_no", selectedStudentNo);
+    if (requiresStudent && studentNo) {
+      url.searchParams.set("student_no", studentNo);
     }
 
     const response = await fetch(url.toString(), {
@@ -152,8 +199,7 @@ export function IntegrationSendPanel({
     return buildPreview(payload, url.toString());
   }
 
-  async function openSendModal(entry: OutgoingEntry) {
-    setActiveEntry(entry);
+  async function refreshPreview(entry: OutgoingEntry, studentNo = selectedStudentNo) {
     setFilterText("");
     if (entry.key === "student-list") {
       setPreviewState(studentListPreview);
@@ -163,7 +209,7 @@ export function IntegrationSendPanel({
     setBusyKey(entry.key);
 
     try {
-      const preview = await fetchPayload(entry);
+      const preview = await fetchPayload(entry, studentNo);
       setPreviewState(preview);
     } catch (error) {
       setPreviewState({
@@ -184,6 +230,11 @@ export function IntegrationSendPanel({
     }
   }
 
+  async function openSendModal(entry: OutgoingEntry) {
+    setIsModalOpen(true);
+    await refreshPreview(entry);
+  }
+
   async function confirmSend() {
     if (!activeEntry) return;
 
@@ -198,14 +249,15 @@ export function IntegrationSendPanel({
         body: JSON.stringify({
           action: "deliver",
           resource: activeEntry.key,
-          student_no: selectedStudentNo
+          student_no: selectedStudentNo,
+          consumer: selectedDestinationOption?.label ?? activeEntry.office
         })
       });
       const payload = await response.json();
       const deliveryPreview = buildPreview(payload, `/api/integrations [deliver:${activeEntry.key}]`);
       setPreviewState(deliveryPreview);
       setResponseText(JSON.stringify(payload, null, 2));
-      setActiveEntry(null);
+      setIsModalOpen(false);
     } catch (error) {
       const raw = JSON.stringify(
         {
@@ -238,42 +290,32 @@ export function IntegrationSendPanel({
     );
   }, [filterText, previewState]);
 
+  const destinationGroupLabel = "Clinic / Guidance / Prefect / CRAD";
+  const integrationModeLabel =
+    activeEntry?.key === "student-list"
+      ? "Student list will be prepared for CRAD and Computer Laboratory consumers."
+      : "Student personal information will be prepared for Clinic, Guidance, and Prefect consumers.";
+
   return (
     <>
       <div className="content-grid two-col">
         <div className="panel-stack">
           <div className="form-cluster">
-            <div className="cluster-title">Outgoing Feed Controls</div>
-            <label>
-              Student
-              <select value={selectedStudentNo} onChange={(event) => setSelectedStudentNo(event.target.value)}>
-                {students.map((student) => (
-                  <option key={student.id} value={student.student_no}>
-                    {student.student_no} - {student.last_name}, {student.first_name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <div className="field-hint">
-              Student selection is used for enrollment data, personal information, and academic records.
-            </div>
-          </div>
-
-          <div className="integration-grid">
-            {outgoing.map((entry) => (
-              <article key={entry.key} className="integration-card">
-                <div className="eyebrow">{entry.office}</div>
-                <h3>{entry.label}</h3>
-                <p className="stat-note">{entry.description}</p>
-                <div className="status-meta">Consumers: {entry.consumers.join(", ")}</div>
-                <div className="status-meta">Endpoint: <code>{entry.path}</code></div>
+            <div className="field-hint">{integrationModeLabel}</div>
+            {activeEntry ? (
+              <div className="integration-card top-gap">
+                <div className="eyebrow">{destinationGroupLabel}</div>
+                <h3>Student List & Information</h3>
+                <p className="stat-note">{integrationModeLabel}</p>
+                <div className="status-meta">Destination: {selectedDestinationOption?.label ?? "-"}</div>
+                <div className="status-meta">Endpoint: <code>{activeEntry.path}</code></div>
                 <div className="top-gap">
-                  <button className="primary" type="button" onClick={() => openSendModal(entry)} disabled={busyKey !== ""}>
-                    {busyKey === entry.key ? "Loading..." : `Send ${entry.label}`}
+                  <button className="primary" type="button" onClick={() => openSendModal(activeEntry)} disabled={busyKey !== ""}>
+                    {busyKey === activeEntry.key ? "Loading..." : "Send Student List & Information"}
                   </button>
                 </div>
-              </article>
-            ))}
+              </div>
+            ) : null}
           </div>
         </div>
 
@@ -288,16 +330,16 @@ export function IntegrationSendPanel({
         </div>
       </div>
 
-      {activeEntry ? (
-        <div className="modal-backdrop" role="presentation" onClick={() => busyKey === "" && setActiveEntry(null)}>
+      {isModalOpen && activeEntry ? (
+        <div className="modal-backdrop" role="presentation" onClick={() => busyKey === "" && setIsModalOpen(false)}>
           <div className="modal-card modal-card-wide" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
             <div className="modal-head">
               <div>
-                <div className="eyebrow">{activeEntry.office}</div>
+                <div className="eyebrow">{selectedDestinationOption?.label ?? activeEntry.office}</div>
                 <h3>Confirm {activeEntry.label}</h3>
-                <p>Review the outgoing data below before sending it to the connected system.</p>
+                <p>Review the outgoing data below before sending it to the selected destination.</p>
               </div>
-              <button className="secondary compact-button" type="button" onClick={() => setActiveEntry(null)} disabled={busyKey !== ""}>
+              <button className="secondary compact-button" type="button" onClick={() => setIsModalOpen(false)} disabled={busyKey !== ""}>
                 Close
               </button>
             </div>
@@ -305,6 +347,45 @@ export function IntegrationSendPanel({
             {previewState ? (
               <>
                 <div className="table-toolbar top-gap">
+                  <label className="field">
+                    <span className="field-label">Student</span>
+                    <select
+                      value={selectedStudentNo}
+                      onChange={(event) => {
+                        const nextStudentNo = event.target.value;
+                        setSelectedStudentNo(nextStudentNo);
+                        if (activeEntry && studentRequiredKeys.has(activeEntry.key)) {
+                          void refreshPreview(activeEntry, nextStudentNo);
+                        }
+                      }}
+                    >
+                      {students.map((student) => (
+                        <option key={student.id} value={student.student_no}>
+                          {student.student_no} - {student.last_name}, {student.first_name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="field">
+                    <span className="field-label">Destination</span>
+                    <select
+                      value={selectedDestination}
+                      onChange={(event) => {
+                        const nextValue = event.target.value;
+                        setSelectedDestination(nextValue);
+                        const nextEntry = destinationOptions.find((option) => option.value === nextValue)?.entry;
+                        if (nextEntry) {
+                          void refreshPreview(nextEntry);
+                        }
+                      }}
+                    >
+                      {destinationOptions.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                   <label className="field">
                     <span className="field-label">Preview Filter</span>
                     <div className="filter-input-shell">
@@ -341,7 +422,7 @@ export function IntegrationSendPanel({
             )}
 
             <div className="modal-actions top-gap">
-              <button className="secondary inline-button" type="button" onClick={() => setActiveEntry(null)} disabled={busyKey !== ""}>
+              <button className="secondary inline-button" type="button" onClick={() => setIsModalOpen(false)} disabled={busyKey !== ""}>
                 Cancel
               </button>
               <button className="primary inline-button" type="button" onClick={confirmSend} disabled={busyKey !== ""}>

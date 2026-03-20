@@ -236,6 +236,15 @@ code { background: #eef4ff; padding: 2px 6px; border-radius: 8px; }
   border-color: rgba(255,255,255,0.08);
   transform: translateX(2px);
 }
+.nav-link.active {
+  background: linear-gradient(135deg, rgba(112, 170, 255, 0.28), rgba(255,255,255,0.12));
+  border-color: rgba(167, 201, 255, 0.34);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08);
+}
+.nav-link.active .nav-icon,
+.nav-link.active .nav-link-label {
+  color: #ffffff;
+}
 .nav-icon {
   width: 18px;
   height: 18px;
@@ -961,9 +970,72 @@ code { background: #eef4ff; padding: 2px 6px; border-radius: 8px; }
   margin: 12px 0 6px;
   color: var(--blue-dark);
 }
+.integration-control-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+}
+.integration-control-field {
+  display: grid;
+}
 .status-stack {
   display: grid;
   gap: 12px;
+}
+
+.soft-badge {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  border-radius: 999px;
+  background: rgba(47, 107, 217, 0.12);
+  color: #1f4da5;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.integration-file-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 120px;
+}
+.integration-file-trigger {
+  padding: 0;
+  border: none;
+  background: transparent;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.integration-file-trigger:hover .integration-file-icon {
+  color: var(--blue);
+  transform: translateY(-1px);
+}
+.integration-file-icon {
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #6f86ad;
+  flex: 0 0 auto;
+  transition: color .16s ease, transform .16s ease;
+}
+.integration-file-icon svg {
+  width: 18px;
+  height: 18px;
+}
+.full-info-row {
+  align-items: flex-start;
+}
+.full-info-row strong {
+  max-width: 58%;
+  text-align: right;
+  line-height: 1.5;
+  word-break: break-word;
 }
 .status-row {
   display: flex;
@@ -997,6 +1069,14 @@ code { background: #eef4ff; padding: 2px 6px; border-radius: 8px; }
 }
 .filter-input-shell input {
   padding-left: 44px !important;
+}
+.select-filter-shell select {
+  padding-left: 14px !important;
+  padding-right: 44px !important;
+}
+.select-filter-shell .filter-icon {
+  left: auto;
+  right: 14px;
 }
 .filter-icon {
   position: absolute;

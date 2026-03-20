@@ -5,7 +5,7 @@ export async function getIntegrationPayload(resource: string, options: { student
   const studentNo = String(options.studentNo ?? "").trim();
   const studentId = Number(options.studentId ?? 0);
   const studentsTable = await resolveTableName("registrar_students", "students");
-  const enrollmentsTable = await resolveTableName("registrar_enrollments", "enrollments");
+  const enrollmentsTable = await resolveTableName("registrar.enrollments", "registrar_enrollments", "enrollments");
   const classesTable = await resolveTableName("registrar_classes", "classes");
   const gradesTable = await resolveTableName("registrar_grades", "grades");
   const incomingRecordTypeMap: Record<string, string> = {

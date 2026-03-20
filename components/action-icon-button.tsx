@@ -2,7 +2,7 @@
 
 import { ButtonHTMLAttributes } from "react";
 
-type ActionKind = "view" | "edit" | "delete";
+type ActionKind = "view" | "edit" | "delete" | "restore";
 
 function ActionIcon({ kind }: { kind: ActionKind }) {
   if (kind === "view") {
@@ -19,6 +19,15 @@ function ActionIcon({ kind }: { kind: ActionKind }) {
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
         <path d="M12 20h9" />
         <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5Z" />
+      </svg>
+    );
+  }
+
+  if (kind === "restore") {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M3 12a9 9 0 1 0 3-6.7" />
+        <path d="M3 4v5h5" />
       </svg>
     );
   }
