@@ -1,8 +1,7 @@
 {
   "/api/[resource]/route": "app/api/[resource]/route.js",
-  "/(protected)/admin/users/page": "app/(protected)/admin/users/page.js",
-  "/(protected)/staff/students/page": "app/(protected)/staff/students/page.js",
   "/(protected)/staff/instructors/page": "app/(protected)/staff/instructors/page.js",
+  "/(protected)/staff/students/page": "app/(protected)/staff/students/page.js",
   "/(protected)/staff/classes/page": "app/(protected)/staff/classes/page.js",
   "/(protected)/staff/enrollments/page": "app/(protected)/staff/enrollments/page.js"
 }

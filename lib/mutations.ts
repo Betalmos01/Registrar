@@ -19,7 +19,7 @@ async function requireReportsTable() {
 }
 
 async function requireGradesTable() {
-  const tableName = await resolveTableName("registrar_grades", "grades");
+  const tableName = await resolveTableName("registrar.grades", "registrar_grades", "grades");
   if (!tableName) {
     throw new Error("The grades table has not been created in this database yet.");
   }
@@ -639,9 +639,20 @@ export async function createGrade(input: {
   return result.rows[0]?.id as number;
 }
 
-export async function updateGrade(input: { id: number; grade: string; remarks?: string; actorId: number }) {
+export async function updateGrade(input: { id: number; semester?: string; grade: string; remarks?: string; actorId: number }) {
   const gradesTable = await requireGradesTable();
-  await pool.query(`update ${gradesTable} set grade = $1, remarks = $2 where id = $3`, [input.grade, input.remarks ?? "", input.id]);
+  const hasSemester = await hasColumn(gradesTable, "semester");
+
+  if (hasSemester) {
+    await pool.query(
+      `update ${gradesTable}
+       set semester = $1, grade = $2, remarks = $3
+       where id = $4`,
+      [input.semester ?? "", input.grade, input.remarks ?? "", input.id]
+    );
+  } else {
+    await pool.query(`update ${gradesTable} set grade = $1, remarks = $2 where id = $3`, [input.grade, input.remarks ?? "", input.id]);
+  }
   await logAction(input.actorId, "Update", "Grades", `Updated grade ID ${input.id}`);
 }
 

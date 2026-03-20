@@ -132,6 +132,7 @@ export function EnrollmentsTablePanel({
   const [isStatsPreviewLoading, setIsStatsPreviewLoading] = useState(false);
   const [isSendingStats, setIsSendingStats] = useState(false);
   const [statsSendState, setStatsSendState] = useState<{ kind: "success" | "error"; message: string } | null>(null);
+  const [statsSuccessPopupMessage, setStatsSuccessPopupMessage] = useState("");
 
   const filteredEnrollments = useMemo(
     () =>
@@ -225,6 +226,7 @@ export function EnrollmentsTablePanel({
         kind: "success",
         message: "Enrollment statistics were sent to PMED."
       });
+      setStatsSuccessPopupMessage("Enrollment statistics were sent to PMED successfully.");
       setActiveModal(null);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to send enrollment statistics to PMED.";
@@ -287,6 +289,35 @@ export function EnrollmentsTablePanel({
       {statsSendState ? (
         <div className={statsSendState.kind === "success" ? "success-banner" : "error-banner"} role="status">
           {statsSendState.message}
+        </div>
+      ) : null}
+
+      {statsSuccessPopupMessage ? (
+        <div className="modal-backdrop" role="presentation" onClick={() => setStatsSuccessPopupMessage("")}>
+          <div className="modal-card modal-card-compact" role="alertdialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-head">
+              <div>
+                <div className="eyebrow">PMED Integration</div>
+                <h3>Send Complete</h3>
+                <p>{statsSuccessPopupMessage}</p>
+              </div>
+            </div>
+
+            <div className="section-card soft-panel top-gap">
+              <div className="section-head">
+                <div>
+                  <h2>Success</h2>
+                  <p>The enrollment statistics batch was confirmed and processed for PMED.</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="modal-actions top-gap">
+              <button className="primary inline-button" type="button" onClick={() => setStatsSuccessPopupMessage("")}>
+                OK
+              </button>
+            </div>
+          </div>
         </div>
       ) : null}
 

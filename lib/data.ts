@@ -154,7 +154,7 @@ async function getEnrollmentsTable() {
 }
 
 async function getGradesTable() {
-  return resolveTableName("registrar_grades", "grades");
+  return resolveTableName("registrar.grades", "registrar_grades", "grades");
 }
 
 async function getAuditLogsTable() {
@@ -879,7 +879,7 @@ export async function listGrades() {
   }
 
   return query(
-    `select grades.id, grades.student_id, grades.class_id, '' as semester, grades.grade, grades.remarks,
+    `select grades.id, grades.student_id, grades.class_id, ${await hasColumn(gradesTable, "semester") ? "coalesce(grades.semester, '')" : "''"} as semester, grades.grade, grades.remarks,
             students.student_no, students.first_name, students.last_name,
             classes.class_code, classes.title
      from ${gradesTable} as grades

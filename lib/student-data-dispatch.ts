@@ -1,6 +1,6 @@
 import { env } from "@/lib/env";
 import { listEnrollments, listStudents } from "@/lib/data";
-import { pool } from "@/lib/db";
+import { hasColumn, pool } from "@/lib/db";
 import { getSubjectsForStudent } from "@/lib/student-subjects";
 
 export type StudentDispatchTargetKey =
@@ -71,8 +71,8 @@ const STUDENT_DISPATCH_TARGETS: StudentDispatchTarget[] = [
 
 const FEED_CONFIG_BY_TARGET: Record<StudentDispatchTargetKey, FeedConfig> = {
   cashier: {
-    schema: "cashier",
-    table: "registrar_student_enrollment_feed"
+    schema: "public",
+    table: "cashier_registrar_student_enrollment_feed"
   },
   clinic: {
     schema: "clinic",
@@ -233,6 +233,29 @@ async function ensureDispatchFeedTable(config: FeedConfig) {
       created_at timestamptz not null default current_timestamp
     )`
   );
+
+  const requiredColumns: Array<{ name: string; definition: string }> = [
+    { name: "batch_id", definition: "text not null default ''" },
+    { name: "source", definition: "text not null default 'Registrar'" },
+    { name: "target_key", definition: "text not null default ''" },
+    { name: "target_label", definition: "text not null default ''" },
+    { name: "row_index", definition: "integer not null default 0" },
+    { name: "student_no", definition: "text" },
+    { name: "student_name", definition: "text" },
+    { name: "program", definition: "text" },
+    { name: "year_level", definition: "text" },
+    { name: "status", definition: "text" },
+    { name: "payload", definition: "jsonb not null default '{}'::jsonb" },
+    { name: "sent_at", definition: "timestamptz not null default current_timestamp" },
+    { name: "created_at", definition: "timestamptz not null default current_timestamp" }
+  ];
+
+  for (const column of requiredColumns) {
+    if (!(await hasColumn(tableName, column.name))) {
+      await pool.query(`alter table ${tableName} add column ${column.name} ${column.definition}`);
+    }
+  }
+
   await pool.query(
     `create index if not exists ${config.table}_batch_idx
      on ${tableName} (batch_id, sent_at desc, row_index asc)`

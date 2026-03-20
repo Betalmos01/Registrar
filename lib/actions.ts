@@ -492,6 +492,7 @@ export async function updateGradeAction(formData: FormData) {
   const user = await requireSessionUser();
   await updateGrade({
     id: Number(formData.get("id") ?? 0),
+    semester: String(formData.get("semester") ?? "").trim(),
     grade: String(formData.get("grade") ?? "").trim(),
     remarks: String(formData.get("remarks") ?? "").trim(),
     actorId: user.id

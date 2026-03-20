@@ -1,4 +1,5 @@
 import { env } from "@/lib/env";
+import { pool } from "@/lib/db";
 import { getIntegrationPayload } from "@/lib/integration-payload";
 
 type DeliveryTarget = {
@@ -40,15 +41,87 @@ async function parseResponse(response: Response) {
   }
 }
 
+async function persistPmedEnrollmentStatistics(payload: any) {
+  const metrics = [
+    { metric: "Students", current_value: Number(payload?.students ?? 0) },
+    { metric: "Enrollments", current_value: Number(payload?.enrollments ?? 0) },
+    { metric: "Classes", current_value: Number(payload?.classes ?? 0) }
+  ];
+  const batchId = crypto.randomUUID();
+  const sentAt = new Date().toISOString();
+  const client = await pool.connect();
+
+  try {
+    await client.query("begin");
+    await client.query(`
+      create table if not exists public.pmed_enrollment_statistics_feed (
+        id bigserial primary key,
+        batch_id text not null,
+        source text not null default 'Registrar',
+        office text not null default 'PMED',
+        metric text not null,
+        current_value integer not null default 0,
+        report_type text not null default 'Enrollment Statistics',
+        payload jsonb not null default '{}'::jsonb,
+        sent_at timestamptz not null default current_timestamp,
+        created_at timestamptz not null default current_timestamp
+      )
+    `);
+    await client.query(`
+      create index if not exists pmed_enrollment_statistics_feed_batch_idx
+      on public.pmed_enrollment_statistics_feed (batch_id, sent_at desc, metric asc)
+    `);
+
+    for (const item of metrics) {
+      await client.query(
+        `insert into public.pmed_enrollment_statistics_feed
+          (batch_id, source, office, metric, current_value, report_type, payload, sent_at, created_at)
+         values ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::timestamptz, current_timestamp)`,
+        [
+          batchId,
+          "Registrar",
+          "PMED",
+          item.metric,
+          item.current_value,
+          "Enrollment Statistics",
+          JSON.stringify(payload ?? {}),
+          sentAt
+        ]
+      );
+    }
+
+    await client.query("commit");
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
+
+  return {
+    batch_id: batchId,
+    sent_at: sentAt,
+    row_count: metrics.length,
+    table: "public.pmed_enrollment_statistics_feed"
+  };
+}
+
 export async function deliverIntegrationResource(resource: string, options: { studentNo?: string; studentId?: number }) {
   const payload = await getIntegrationPayload(resource, options);
+  const persisted =
+    resource === "enrollment-statistics"
+      ? await persistPmedEnrollmentStatistics(payload)
+      : null;
   const targets = readTargets(resource);
 
   if (targets.length === 0) {
     return {
-      ok: false,
-      message: "No delivery endpoint is configured for this integration resource yet.",
+      ok: Boolean(persisted),
+      message: persisted
+        ? "Integration data stored successfully."
+        : "No delivery endpoint is configured for this integration resource yet.",
       payload,
+      storage: persisted,
       deliveries: []
     };
   }
@@ -93,11 +166,16 @@ export async function deliverIntegrationResource(resource: string, options: { st
   );
 
   return {
-    ok: deliveries.every((delivery) => delivery.ok),
+    ok: Boolean(persisted) || deliveries.every((delivery) => delivery.ok),
     message: deliveries.every((delivery) => delivery.ok)
-      ? "Integration delivery completed."
-      : "One or more integration deliveries failed.",
+      ? persisted
+        ? "Integration delivery completed and stored."
+        : "Integration delivery completed."
+      : persisted
+        ? "Integration data stored, but one or more endpoint deliveries failed."
+        : "One or more integration deliveries failed.",
     payload,
+    storage: persisted,
     deliveries
   };
 }
