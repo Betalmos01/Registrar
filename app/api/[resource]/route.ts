@@ -12,6 +12,7 @@ import {
 import { buildIntegrationManifest, integrationCatalog } from "@/lib/integration-catalog";
 import { deliverIntegrationResource } from "@/lib/integration-delivery";
 import { getIntegrationPayload } from "@/lib/integration-payload";
+import { dispatchStudentData, getStudentDispatchPreview } from "@/lib/student-data-dispatch";
 import {
   listAcademicReports,
   listClassListSummary,
@@ -162,6 +163,21 @@ export async function GET(request: Request, context: { params: Promise<{ resourc
 
         return json({ ok: status.ok, data: status }, status.ok ? 200 : 404);
       }
+      if (integrationResource === "student-dispatch-preview") {
+        const user = await requireIntegrationAccess(request);
+        if (!user) return json({ ok: false, error: "Unauthorized." }, 401);
+
+        const preview = await getStudentDispatchPreview({
+          targetKey: String(url.searchParams.get("target_key") ?? "").trim(),
+          studentNo: String(url.searchParams.get("student_no") ?? "").trim() || undefined
+        });
+
+        return json({
+          ok: true,
+          message: "Student integration preview prepared.",
+          data: preview
+        });
+      }
       const outgoingMapping = integrationCatalog.find((entry) => entry.direction === "outgoing" && entry.key === integrationResource);
       const user = outgoingMapping ? await requireIntegrationAccess(request) : await requireIntegrationUser(request);
       if (!user) return json({ ok: false, error: "Unauthorized." }, 401);
@@ -255,6 +271,24 @@ export async function POST(request: Request, context: { params: Promise<{ resour
             }
           },
           dispatch.ok ? 200 : 422
+        );
+      }
+      if (action === "dispatch_student_data") {
+        const user = await requireIntegrationAccess(request);
+        if (!user) return json({ ok: false, error: "Unauthorized." }, 401);
+
+        const result = await dispatchStudentData({
+          targetKey: String(input.target_key ?? input.targetKey ?? "").trim(),
+          studentNo: String(input.student_no ?? input.studentNo ?? "").trim() || undefined
+        });
+
+        return json(
+          {
+            ok: result.ok,
+            message: result.message,
+            data: result
+          },
+          result.ok ? 200 : 422
         );
       }
       const outgoingMapping = integrationCatalog.find((entry) => entry.direction === "outgoing" && entry.key === integrationResource);

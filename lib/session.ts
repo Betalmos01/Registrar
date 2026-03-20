@@ -23,6 +23,7 @@ type SessionPayload = {
 };
 
 const COOKIE_NAME = "bpc_registrar_session";
+const FLASH_COOKIE_NAME = "bpc_registrar_flash_success";
 const MAX_AGE_SECONDS = 60 * 60 * 12;
 
 function sign(value: string): string {
@@ -74,4 +75,20 @@ export async function setSession(user: SessionUser): Promise<void> {
 export async function clearSession(): Promise<void> {
   const jar = await cookies();
   jar.delete(COOKIE_NAME);
+}
+
+export async function setSuccessFlash(message: string): Promise<void> {
+  const jar = await cookies();
+  jar.set(FLASH_COOKIE_NAME, message, {
+    httpOnly: false,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    path: "/",
+    maxAge: 60
+  });
+}
+
+export async function getSuccessFlash(): Promise<string> {
+  const jar = await cookies();
+  return jar.get(FLASH_COOKIE_NAME)?.value ?? "";
 }

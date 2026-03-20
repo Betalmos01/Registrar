@@ -4,7 +4,7 @@ import bcrypt from "bcryptjs";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { getAuthUserByLogin } from "./data";
-import { getSessionUser, clearSession, setSession } from "./session";
+import { getSessionUser, clearSession, setSession, setSuccessFlash } from "./session";
 import {
   createAcademicReport,
   createClassSchedule,
@@ -32,6 +32,7 @@ import {
   markNotificationRead,
   resetUserPassword,
   toggleUserAccount,
+  unassignInstructorClass,
   updateAcademicReport,
   updateClassSchedule,
   updateDocumentRequest,
@@ -191,6 +192,7 @@ export async function createStudentAction(formData: FormData) {
     phone: String(formData.get("phone") ?? "").trim(),
     actorId: user.id
   });
+  await setSuccessFlash("Student saved successfully.");
   revalidatePath("/staff/students");
   revalidateCorePaths();
 }
@@ -215,6 +217,7 @@ export async function updateStudentAction(formData: FormData) {
     phone: String(formData.get("phone") ?? "").trim(),
     actorId: user.id
   });
+  await setSuccessFlash("Student updated successfully.");
   revalidatePath("/staff/students");
   revalidateCorePaths();
 }
@@ -222,6 +225,7 @@ export async function updateStudentAction(formData: FormData) {
 export async function deleteStudentAction(formData: FormData) {
   const user = await requireSessionUser();
   await deleteStudent({ id: Number(formData.get("id") ?? 0), actorId: user.id });
+  await setSuccessFlash("Student deleted successfully.");
   revalidatePath("/staff/students");
   revalidateCorePaths();
 }
@@ -235,6 +239,7 @@ export async function createInstructorAction(formData: FormData) {
     department: String(formData.get("department") ?? "").trim(),
     actorId: user.id
   });
+  await setSuccessFlash("Instructor saved successfully.");
   revalidatePath("/staff/instructors");
   revalidateCorePaths();
 }
@@ -249,6 +254,7 @@ export async function updateInstructorAction(formData: FormData) {
     department: String(formData.get("department") ?? "").trim(),
     actorId: user.id
   });
+  await setSuccessFlash("Instructor updated successfully.");
   revalidatePath("/staff/instructors");
   revalidateCorePaths();
 }
@@ -256,6 +262,7 @@ export async function updateInstructorAction(formData: FormData) {
 export async function deleteInstructorAction(formData: FormData) {
   const user = await requireSessionUser();
   await deleteInstructor({ id: String(formData.get("id") ?? "").trim(), actorId: user.id });
+  await setSuccessFlash("Instructor deleted successfully.");
   revalidatePath("/staff/instructors");
   revalidateCorePaths();
 }
@@ -267,6 +274,21 @@ export async function assignInstructorClassAction(formData: FormData) {
     classId: Number(formData.get("class_id") ?? 0),
     actorId: user.id
   });
+  await setSuccessFlash("Instructor class assignment saved successfully.");
+  revalidatePath("/staff/instructors");
+  revalidatePath("/staff/classes");
+  revalidatePath("/staff/schedules");
+  revalidateCorePaths();
+}
+
+export async function unassignInstructorClassAction(formData: FormData) {
+  const user = await requireSessionUser();
+  await unassignInstructorClass({
+    employeeNo: String(formData.get("employee_no") ?? "").trim(),
+    classId: Number(formData.get("class_id") ?? 0),
+    actorId: user.id
+  });
+  await setSuccessFlash("Assigned class removed successfully.");
   revalidatePath("/staff/instructors");
   revalidatePath("/staff/classes");
   revalidatePath("/staff/schedules");
@@ -285,6 +307,7 @@ export async function createClassAction(formData: FormData) {
     room: String(formData.get("room") ?? "").trim(),
     actorId: user.id
   });
+  await setSuccessFlash("Class saved successfully.");
   revalidatePath("/staff/classes");
   revalidatePath("/staff/class-lists");
   revalidatePath("/staff/schedules");
@@ -304,6 +327,7 @@ export async function updateClassAction(formData: FormData) {
     room: String(formData.get("room") ?? "").trim(),
     actorId: user.id
   });
+  await setSuccessFlash("Class updated successfully.");
   revalidatePath("/staff/classes");
   revalidatePath("/staff/class-lists");
   revalidatePath("/staff/schedules");
@@ -313,6 +337,7 @@ export async function updateClassAction(formData: FormData) {
 export async function deleteClassAction(formData: FormData) {
   const user = await requireSessionUser();
   await deleteClassSchedule({ classId: Number(formData.get("class_id") ?? 0), actorId: user.id });
+  await setSuccessFlash("Class deleted successfully.");
   revalidatePath("/staff/classes");
   revalidatePath("/staff/class-lists");
   revalidatePath("/staff/schedules");
@@ -325,6 +350,7 @@ export async function createClassListAction(formData: FormData) {
     classId: Number(formData.get("class_id") ?? 0),
     actorId: user.id
   });
+  await setSuccessFlash("Class list saved successfully.");
   revalidatePath("/staff/class-lists");
   revalidatePath("/staff/classes");
   revalidateCorePaths();
@@ -389,6 +415,7 @@ export async function createEnrollmentAction(formData: FormData) {
       // Non-blocking if shared or legacy cashier delivery is not configured yet.
     }
   }
+  await setSuccessFlash("Enrollment saved successfully.");
   revalidatePath("/staff/enrollments");
   revalidatePath("/staff/bin");
   revalidatePath("/staff/class-lists");
@@ -409,6 +436,7 @@ export async function updateEnrollmentAction(formData: FormData) {
     idFee: FIXED_ID_FEE,
     actorId: user.id
   });
+  await setSuccessFlash("Enrollment updated successfully.");
   revalidatePath("/staff/enrollments");
   revalidatePath("/staff/bin");
   revalidatePath("/staff/class-lists");
@@ -419,6 +447,7 @@ export async function updateEnrollmentAction(formData: FormData) {
 export async function deleteEnrollmentAction(formData: FormData) {
   const user = await requireSessionUser();
   await deleteEnrollment({ id: Number(formData.get("id") ?? 0), actorId: user.id });
+  await setSuccessFlash("Enrollment moved to bin successfully.");
   revalidatePath("/staff/enrollments");
   revalidatePath("/staff/bin");
   revalidatePath("/staff/class-lists");
@@ -428,6 +457,7 @@ export async function deleteEnrollmentAction(formData: FormData) {
 export async function restoreEnrollmentAction(formData: FormData) {
   const user = await requireSessionUser();
   await restoreEnrollment({ id: Number(formData.get("id") ?? 0), actorId: user.id });
+  await setSuccessFlash("Enrollment restored successfully.");
   revalidatePath("/staff/enrollments");
   revalidatePath("/staff/bin");
   revalidateCorePaths();
@@ -436,6 +466,7 @@ export async function restoreEnrollmentAction(formData: FormData) {
 export async function purgeEnrollmentAction(formData: FormData) {
   const user = await requireSessionUser();
   await purgeEnrollment({ id: Number(formData.get("id") ?? 0), actorId: user.id });
+  await setSuccessFlash("Enrollment deleted permanently.");
   revalidatePath("/staff/bin");
   revalidatePath("/staff/enrollments");
   revalidateCorePaths();
@@ -451,6 +482,7 @@ export async function createGradeAction(formData: FormData) {
     remarks: String(formData.get("remarks") ?? "").trim(),
     actorId: user.id
   });
+  await setSuccessFlash("Grade saved successfully.");
   revalidatePath("/staff/grades");
   revalidatePath("/staff/class-lists");
   revalidateCorePaths();
@@ -464,6 +496,7 @@ export async function updateGradeAction(formData: FormData) {
     remarks: String(formData.get("remarks") ?? "").trim(),
     actorId: user.id
   });
+  await setSuccessFlash("Grade updated successfully.");
   revalidatePath("/staff/grades");
   revalidatePath("/staff/class-lists");
   revalidateCorePaths();
@@ -472,6 +505,7 @@ export async function updateGradeAction(formData: FormData) {
 export async function deleteGradeAction(formData: FormData) {
   const user = await requireSessionUser();
   await deleteGrade({ id: Number(formData.get("id") ?? 0), actorId: user.id });
+  await setSuccessFlash("Grade deleted successfully.");
   revalidatePath("/staff/grades");
   revalidatePath("/staff/class-lists");
   revalidateCorePaths();
@@ -484,6 +518,7 @@ export async function createDocumentAction(formData: FormData) {
     docType: String(formData.get("doc_type") ?? "").trim(),
     actorId: user.id
   });
+  await setSuccessFlash("Document request saved successfully.");
   revalidatePath("/staff/documents");
   revalidateCorePaths();
 }
@@ -495,6 +530,7 @@ export async function updateDocumentAction(formData: FormData) {
     status: String(formData.get("status") ?? "").trim(),
     actorId: user.id
   });
+  await setSuccessFlash("Document request updated successfully.");
   revalidatePath("/staff/documents");
   revalidateCorePaths();
 }
@@ -502,6 +538,7 @@ export async function updateDocumentAction(formData: FormData) {
 export async function deleteDocumentAction(formData: FormData) {
   const user = await requireSessionUser();
   await deleteDocumentRequest({ id: Number(formData.get("doc_id") ?? 0), actorId: user.id });
+  await setSuccessFlash("Document request deleted successfully.");
   revalidatePath("/staff/documents");
   revalidateCorePaths();
 }

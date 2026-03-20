@@ -6,20 +6,35 @@
       "static/css/app/layout.css",
       "static/chunks/app/layout.js"
     ],
+    "/page": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/page.js"
+    ],
     "/(protected)/loading": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
       "static/chunks/app/(protected)/loading.js"
     ],
-    "/(protected)/staff/class-lists/page": [
+    "/(protected)/admin/dashboard/page": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
-      "static/chunks/app/(protected)/staff/class-lists/page.js"
+      "static/chunks/app/(protected)/admin/dashboard/page.js"
     ],
-    "/(protected)/staff/schedules/page": [
+    "/(protected)/admin/users/page": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
-      "static/chunks/app/(protected)/staff/schedules/page.js"
+      "static/chunks/app/(protected)/admin/users/page.js"
+    ],
+    "/(protected)/staff/students/page": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/(protected)/staff/students/page.js"
+    ],
+    "/(protected)/staff/instructors/page": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/(protected)/staff/instructors/page.js"
     ],
     "/(protected)/staff/classes/page": [
       "static/chunks/webpack.js",
@@ -30,6 +45,11 @@
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
       "static/chunks/app/(protected)/staff/enrollments/page.js"
+    ],
+    "/api/[resource]/route": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/api/[resource]/route.js"
     ]
   }
 }

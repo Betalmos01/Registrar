@@ -373,6 +373,29 @@ export async function assignInstructorClass(input: {
   await logAction(input.actorId, "Assign", "Instructors", `Assigned class ID ${input.classId} to instructor ${input.employeeNo}`);
 }
 
+export async function unassignInstructorClass(input: {
+  employeeNo: string;
+  classId: number;
+  actorId: number;
+}) {
+  const assignmentsTable = await resolveTableName(
+    "registrar_instructor_class_assignments",
+    "registrar.instructor_class_assignments",
+    "instructor_class_assignments"
+  );
+  if (!assignmentsTable) {
+    throw new Error("The instructor class assignments table has not been created in this database yet.");
+  }
+
+  await pool.query(
+    `delete from ${assignmentsTable}
+     where instructor_employee_no = $1 and class_id = $2`,
+    [input.employeeNo, input.classId]
+  );
+
+  await logAction(input.actorId, "Unassign", "Instructors", `Removed class ID ${input.classId} from instructor ${input.employeeNo}`);
+}
+
 export async function createClassSchedule(input: {
   classCode: string;
   title: string;

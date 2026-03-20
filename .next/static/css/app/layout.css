@@ -595,6 +595,9 @@ code { background: #eef4ff; padding: 2px 6px; border-radius: 8px; }
 .modal-card-wide {
   width: min(1120px, 100%);
 }
+.modal-card-compact {
+  width: min(560px, 100%);
+}
 .modal-head {
   display: flex;
   justify-content: space-between;
@@ -964,6 +967,36 @@ code { background: #eef4ff; padding: 2px 6px; border-radius: 8px; }
   border-radius: 16px;
   background: #eff4fd;
 }
+.segmented-control {
+  display: inline-flex;
+  gap: 6px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: linear-gradient(180deg, #f8fbff, #eef4ff);
+  width: -moz-fit-content;
+  width: fit-content;
+}
+.segmented-control button {
+  min-width: 160px;
+  padding: 10px 14px;
+  border: none;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--muted);
+  font-weight: 700;
+  cursor: pointer;
+  transition: background .18s ease, color .18s ease, box-shadow .18s ease;
+}
+.segmented-control button:hover {
+  color: var(--blue-dark);
+  background: rgba(255,255,255,0.72);
+}
+.segmented-control button.is-active {
+  background: #fff;
+  color: var(--blue-dark);
+  box-shadow: 0 8px 18px rgba(16, 39, 78, 0.08);
+}
 .segment {
   padding: 8px 12px;
   border-radius: 12px;
@@ -1018,6 +1051,51 @@ code { background: #eef4ff; padding: 2px 6px; border-radius: 8px; }
   padding: 0.35rem 0.75rem;
   font-size: 0.82rem;
   font-weight: 700;
+}
+.assigned-class-chip {
+  margin: 0;
+}
+.assigned-class-remove {
+  border: none;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.88);
+  color: #b42318;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+.assigned-class-remove:hover {
+  background: #fff1f2;
+}
+.confirm-panel {
+  display: grid;
+  grid-gap: 14px;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid #f3d1cf;
+  border-radius: 20px;
+  background: linear-gradient(180deg, #fff9f9, #fff4f4);
+}
+.confirm-panel-copy {
+  display: grid;
+  grid-gap: 6px;
+  gap: 6px;
+}
+.confirm-panel-copy strong {
+  color: var(--blue-dark);
+  font-size: 18px;
+}
+.confirm-panel-copy span {
+  color: var(--muted);
+}
+.danger-copy {
+  margin: 0;
+  color: #b42318;
+  line-height: 1.6;
+}
+.danger-fill {
+  background: linear-gradient(135deg, #c2410c, #e11d48);
 }
 
 .integration-file-cell {
@@ -1220,6 +1298,13 @@ code { background: #eef4ff; padding: 2px 6px; border-radius: 8px; }
 }
 
 @media (max-width: 640px) {
+  .segmented-control {
+    width: 100%;
+  }
+  .segmented-control button {
+    min-width: 0;
+    flex: 1 1;
+  }
   .profile-summary {
     display: none;
   }

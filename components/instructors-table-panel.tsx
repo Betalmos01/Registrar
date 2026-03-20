@@ -3,7 +3,13 @@
 import { useState } from "react";
 import { ActionIconButton } from "@/components/action-icon-button";
 import { DataTable } from "@/components/data-table";
-import { assignInstructorClassAction, createInstructorAction, deleteInstructorAction, updateInstructorAction } from "@/lib/actions";
+import {
+  assignInstructorClassAction,
+  createInstructorAction,
+  deleteInstructorAction,
+  unassignInstructorClassAction,
+  updateInstructorAction
+} from "@/lib/actions";
 
 type InstructorRecord = {
   id: string | number;
@@ -33,10 +39,10 @@ export function InstructorsTablePanel({
   classes: ClassOption[];
   canManage: boolean;
 }) {
-  const [activeModal, setActiveModal] = useState<"add" | "view" | "edit" | "assign" | null>(null);
+  const [activeModal, setActiveModal] = useState<"add" | "view" | "edit" | "assign" | "delete" | null>(null);
   const [selectedInstructor, setSelectedInstructor] = useState<InstructorRecord | null>(null);
 
-  function openModal(mode: "view" | "edit" | "assign", instructor: InstructorRecord) {
+  function openModal(mode: "view" | "edit" | "assign" | "delete", instructor: InstructorRecord) {
     setSelectedInstructor(instructor);
     setActiveModal(mode);
   }
@@ -61,9 +67,26 @@ export function InstructorsTablePanel({
               {instructor.assigned_classes?.length ? (
                 <div className="status-stack">
                   {instructor.assigned_classes.map((assignedClass) => (
-                    <span key={`${instructor.employee_no}-${assignedClass.class_id}`} className="soft-badge">
-                      {assignedClass.class_code} - {assignedClass.title}
-                    </span>
+                    <form
+                      key={`${instructor.employee_no}-${assignedClass.class_id}`}
+                      action={unassignInstructorClassAction}
+                      className="assigned-class-chip"
+                    >
+                      <input type="hidden" name="employee_no" value={String(instructor.employee_no)} />
+                      <input type="hidden" name="class_id" value={String(assignedClass.class_id)} />
+                      <span className="soft-badge">
+                        <span>{assignedClass.class_code} - {assignedClass.title}</span>
+                        {canManage ? (
+                          <button
+                            className="assigned-class-remove"
+                            type="submit"
+                            aria-label={`Remove ${assignedClass.class_code} from ${instructor.first_name} ${instructor.last_name}`}
+                          >
+                            Remove
+                          </button>
+                        ) : null}
+                      </span>
+                    </form>
                   ))}
                 </div>
               ) : (
@@ -94,10 +117,12 @@ export function InstructorsTablePanel({
                     type="button"
                     onClick={() => openModal("edit", instructor)}
                   />
-                  <form action={deleteInstructorAction}>
-                    <input type="hidden" name="id" value={String(instructor.id)} />
-                    <ActionIconButton kind="delete" label="Delete instructor" type="submit" />
-                  </form>
+                  <ActionIconButton
+                    kind="delete"
+                    label="Delete instructor"
+                    type="button"
+                    onClick={() => openModal("delete", instructor)}
+                  />
                 </div>
               </td>
             ) : null}
@@ -214,6 +239,34 @@ export function InstructorsTablePanel({
                 <button className="secondary inline-button" type="button" onClick={() => setActiveModal(null)}>Cancel</button>
                 <button className="primary inline-button" type="submit">Assign Class</button>
               </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
+
+      {canManage && activeModal === "delete" && selectedInstructor ? (
+        <div className="modal-backdrop" role="presentation" onClick={() => setActiveModal(null)}>
+          <div className="modal-card modal-card-compact" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-head">
+              <div>
+                <div className="eyebrow">Faculty Directory</div>
+                <h3>Delete Instructor</h3>
+                <p>Remove this instructor record from the registrar directory.</p>
+              </div>
+              <button className="secondary compact-button" type="button" onClick={() => setActiveModal(null)}>Close</button>
+            </div>
+            <div className="top-gap confirm-panel">
+              <div className="confirm-panel-copy">
+                <strong>{selectedInstructor.first_name} {selectedInstructor.last_name}</strong>
+                <span>Employee No: {selectedInstructor.employee_no}</span>
+                <span>Department: {selectedInstructor.department ?? "-"}</span>
+              </div>
+              <p className="danger-copy">This will delete the instructor record. Assigned class links should be removed first if you still need them.</p>
+            </div>
+            <form className="modal-actions top-gap" action={deleteInstructorAction}>
+              <input type="hidden" name="id" value={String(selectedInstructor.id)} />
+              <button className="secondary inline-button" type="button" onClick={() => setActiveModal(null)}>Cancel</button>
+              <button className="primary inline-button danger-fill" type="submit">Delete Instructor</button>
             </form>
           </div>
         </div>

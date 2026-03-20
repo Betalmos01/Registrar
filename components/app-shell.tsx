@@ -2,7 +2,7 @@ import { ReactNode } from "react";
 import { getNavigation } from "@/lib/navigation";
 import { getUnreadNotificationCount, listNotifications } from "@/lib/data";
 import { AppShellClient } from "@/components/app-shell-client";
-import type { SessionUser } from "@/lib/session";
+import { getSuccessFlash, type SessionUser } from "@/lib/session";
 
 export async function AppShell({
   user,
@@ -16,7 +16,11 @@ export async function AppShell({
   children: ReactNode;
 }) {
   const nav = getNavigation(user.role);
-  const [notifications, unreadCount] = await Promise.all([listNotifications(), getUnreadNotificationCount()]);
+  const [notifications, unreadCount, successMessage] = await Promise.all([
+    listNotifications(),
+    getUnreadNotificationCount(),
+    getSuccessFlash()
+  ]);
 
   return (
     <AppShellClient
@@ -26,6 +30,7 @@ export async function AppShell({
       nav={nav}
       notifications={notifications as Array<{ id: number | string; title: string; message: string; status: string; created_at: string }>}
       unreadCount={unreadCount}
+      successMessage={successMessage}
     >
       {children}
     </AppShellClient>
