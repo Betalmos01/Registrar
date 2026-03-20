@@ -43,7 +43,12 @@ export function ClassesTablePanel({
   const [showEditModal, setShowEditModal] = useState(false);
   const [selectedClassId, setSelectedClassId] = useState("");
   const [selectedAddCode, setSelectedAddCode] = useState("");
+  const [customAddCode, setCustomAddCode] = useState("");
   const [selectedEditCode, setSelectedEditCode] = useState("");
+  const [addClassTitle, setAddClassTitle] = useState("");
+  const [addCourse, setAddCourse] = useState("");
+  const [addUnits, setAddUnits] = useState("3");
+  const [addMode, setAddMode] = useState<"template" | "custom">("custom");
 
   const selectedClass = classes.find((item) => String(item.id) === selectedClassId) ?? null;
   const classTemplates = useMemo(() => {
@@ -66,9 +71,24 @@ export function ClassesTablePanel({
 
   useEffect(() => {
     if (showAddModal) {
+      setAddMode("custom");
       setSelectedAddCode("");
+      setCustomAddCode("");
+      setAddClassTitle("");
+      setAddCourse("");
+      setAddUnits("3");
     }
   }, [showAddModal]);
+
+  useEffect(() => {
+    if (addMode !== "template" || !selectedAddCode) {
+      return;
+    }
+
+    setAddClassTitle(addTemplate?.title ?? "");
+    setAddCourse(addTemplate?.course ?? "");
+    setAddUnits(String(addTemplate?.units ?? 3));
+  }, [addMode, addTemplate, selectedAddCode]);
 
   useEffect(() => {
     if (selectedClass) {
@@ -129,14 +149,35 @@ export function ClassesTablePanel({
             <form className="form-grid top-gap" action={createClassAction}>
               <div className="form-cluster span-2">
                 <div className="cluster-title">Class & Schedule Setup</div>
+                <div className="span-2 segmented-control" role="tablist" aria-label="Add class mode">
+                  <button
+                    className={addMode === "custom" ? "is-active" : ""}
+                    type="button"
+                    onClick={() => {
+                      setAddMode("custom");
+                      setSelectedAddCode("");
+                    }}
+                  >
+                    Type New Class
+                  </button>
+                  <button
+                    className={addMode === "template" ? "is-active" : ""}
+                    type="button"
+                    onClick={() => {
+                      setAddMode("template");
+                      setCustomAddCode("");
+                      setAddClassTitle("");
+                      setAddCourse("");
+                      setAddUnits("3");
+                    }}
+                  >
+                    Use Existing Template
+                  </button>
+                </div>
+                {addMode === "template" ? (
                 <label>
                   Class Code
-                  <select
-                    name="class_code"
-                    required
-                    value={selectedAddCode}
-                    onChange={(event) => setSelectedAddCode(event.target.value)}
-                  >
+                  <select value={selectedAddCode} onChange={(event) => setSelectedAddCode(event.target.value)} required>
                     <option value="" disabled>Select class code</option>
                     {classTemplates.map((item) => (
                       <option key={item.code} value={item.code}>
@@ -145,13 +186,36 @@ export function ClassesTablePanel({
                     ))}
                   </select>
                 </label>
+                ) : null}
+                <label>
+                  Class Code
+                  <input
+                    name="class_code"
+                    required
+                    value={addMode === "custom" ? customAddCode : selectedAddCode}
+                    onChange={(event) => {
+                      if (addMode === "custom") {
+                        setCustomAddCode(event.target.value.toUpperCase());
+                      }
+                    }}
+                    readOnly={addMode !== "custom"}
+                    placeholder={addMode === "custom" ? "Type new class code" : ""}
+                  />
+                </label>
                 <label>
                   Class Title
-                  <input name="class_title" required readOnly value={addTemplate?.title ?? ""} />
+                  <input
+                    name="class_title"
+                    required
+                    value={addClassTitle}
+                    onChange={(event) => setAddClassTitle(event.target.value)}
+                    readOnly={addMode !== "custom" && selectedAddCode !== ""}
+                    placeholder="Type class title"
+                  />
                 </label>
                 <label>
                   Subject / Course
-                  <select name="course" value={addTemplate?.course ?? ""} onChange={() => undefined}>
+                  <select name="course" value={addCourse} onChange={(event) => setAddCourse(event.target.value)} required>
                     <option value="">Select course</option>
                     {filters.courses.map((course) => (
                       <option key={course}>{course}</option>
@@ -160,7 +224,15 @@ export function ClassesTablePanel({
                 </label>
                 <label>
                   Units
-                  <input name="units" type="number" min="1" max="6" readOnly value={String(addTemplate?.units ?? 3)} />
+                  <input
+                    name="units"
+                    type="number"
+                    min="1"
+                    max="6"
+                    value={addUnits}
+                    onChange={(event) => setAddUnits(event.target.value)}
+                    readOnly={addMode !== "custom" && selectedAddCode !== ""}
+                  />
                 </label>
                 <label>
                   Day

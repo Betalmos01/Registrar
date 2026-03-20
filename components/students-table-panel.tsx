@@ -6,6 +6,7 @@ import { ActionIconButton } from "@/components/action-icon-button";
 import { createStudentAction, deleteStudentAction, updateStudentAction } from "@/lib/actions";
 import { DataTable } from "@/components/data-table";
 import { StatusBadge } from "@/components/status-badge";
+import { getSubjectsForStudent } from "@/lib/student-subjects";
 
 const COURSE_OPTIONS = [
   "BEED",
@@ -212,6 +213,7 @@ export function StudentsTablePanel({
           "Full Info",
           "Program",
           "Year",
+          "All Subjects",
           "Status",
           "Payment",
           "Medical",
@@ -243,6 +245,15 @@ export function StudentsTablePanel({
             </td>
             <td>{String(student.program ?? "-")}</td>
             <td>{String(student.year_level ?? "-")}</td>
+            <td>
+              <div className="actions-row">
+                {getSubjectsForStudent(student.program, student.year_level).map((subject) => (
+                  <span key={`${student.id}-${subject}`} className="soft-badge">
+                    {subject}
+                  </span>
+                ))}
+              </div>
+            </td>
             <td><StatusBadge value={String(student.status)} /></td>
             <td><StatusBadge value={String(student.payment_status ?? "Pending")} /></td>
             <td>

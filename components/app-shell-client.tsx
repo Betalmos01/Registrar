@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ReactNode, useState } from "react";
+import { ReactNode, useEffect, useState } from "react";
 import logo from "@/lib/Logo/logo.png";
 import { ShellTopbar } from "@/components/shell-topbar";
 import type { SessionUser } from "@/lib/session";
@@ -70,7 +70,8 @@ export function AppShellClient({
   children,
   nav,
   notifications,
-  unreadCount
+  unreadCount,
+  successMessage
 }: {
   user: SessionUser;
   title: string;
@@ -79,9 +80,18 @@ export function AppShellClient({
   nav: NavSection[];
   notifications: Array<{ id: number | string; title: string; message: string; status: string; created_at: string }>;
   unreadCount: number;
+  successMessage: string;
 }) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [flashMessage, setFlashMessage] = useState(successMessage);
   const pathname = usePathname();
+
+  useEffect(() => {
+    setFlashMessage(successMessage);
+    if (successMessage) {
+      document.cookie = "bpc_registrar_flash_success=; Max-Age=0; path=/";
+    }
+  }, [successMessage]);
 
   return (
     <div className={`app-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
@@ -134,6 +144,14 @@ export function AppShellClient({
           unreadCount={unreadCount}
           onToggleSidebar={() => setSidebarCollapsed((value) => !value)}
         />
+        {flashMessage ? (
+          <div className="success-banner" role="status">
+            <span>{flashMessage}</span>
+            <button className="secondary compact-button" type="button" onClick={() => setFlashMessage("")}>
+              Close
+            </button>
+          </div>
+        ) : null}
         {children}
       </main>
     </div>

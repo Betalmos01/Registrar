@@ -1,9 +1,8 @@
 import { AppShell } from "@/components/app-shell";
-import { IntegrationSendPanel } from "@/components/integration-send-panel";
 import { SectionCard } from "@/components/section-card";
+import { StudentDataIntegrationPanel } from "@/components/student-data-integration-panel";
 import { StudentsTablePanel } from "@/components/students-table-panel";
 import { requireRole } from "@/lib/auth";
-import { listRegistrarOutgoingDepartments } from "@/lib/department-integration";
 import { getNextStudentNumber, getStudentFilters, listStudents } from "@/lib/data";
 
 export default async function StudentsPage({
@@ -18,7 +17,6 @@ export default async function StudentsPage({
     getStudentFilters(),
     getNextStudentNumber()
   ]);
-  const studentOutgoing = await listRegistrarOutgoingDepartments();
   const isAdmin = user.role.trim().toLowerCase() === "admin";
 
   return (
@@ -42,10 +40,34 @@ export default async function StudentsPage({
         </SectionCard>
 
         {isAdmin ? (
-          <SectionCard title="Student Data Integrations" description="Queue registrar student profile and roster flows to the connected departments from this page.">
-            <IntegrationSendPanel
-              students={students as Array<{ id: number; student_no: string; first_name: string; last_name: string }>}
-              outgoing={studentOutgoing}
+          <SectionCard title="Student Data Integrations" description="Send registrar student datasets to Cashier, Clinic, Guidance, Prefect, Computer Laboratory, and CRAD from this page.">
+            <StudentDataIntegrationPanel
+              targets={[
+                {
+                  key: "cashier",
+                  label: "Cashier",
+                },
+                {
+                  key: "clinic",
+                  label: "Clinic",
+                },
+                {
+                  key: "guidance",
+                  label: "Guidance",
+                },
+                {
+                  key: "prefect",
+                  label: "Prefect",
+                },
+                {
+                  key: "computer-laboratory",
+                  label: "Computer Laboratory",
+                },
+                {
+                  key: "crad",
+                  label: "CRAD",
+                }
+              ]}
             />
           </SectionCard>
         ) : null}

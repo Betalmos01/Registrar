@@ -42,6 +42,18 @@ type ClassOption = {
   title: string;
 };
 
+type StatsPreviewRow = {
+  label: string;
+  value: string;
+};
+
+type StatsPreviewSheetRow = {
+  metric: string;
+  current_value: number;
+  office: string;
+  report_type: string;
+};
+
 const COURSE_OPTIONS = [
   "BEED",
   "BSED - English",
@@ -84,6 +96,21 @@ function peso(value: number | string | null | undefined) {
   }).format(Number.isFinite(amount) ? amount : 0);
 }
 
+async function parseResponse(response: Response) {
+  const text = await response.text();
+  return text ? JSON.parse(text) : {};
+}
+
+function buildStatsPreviewRows(payload: any): StatsPreviewRow[] {
+  const data = payload?.data ?? payload?.payload ?? {};
+
+  return [
+    { label: "Students", value: String(data.students ?? 0) },
+    { label: "Enrollments", value: String(data.enrollments ?? 0) },
+    { label: "Classes", value: String(data.classes ?? 0) }
+  ];
+}
+
 export function EnrollmentsTablePanel({
   enrollments,
   students,
@@ -95,11 +122,16 @@ export function EnrollmentsTablePanel({
   classes: ClassOption[];
   nextStudentNumber: string;
 }) {
-  const [activeModal, setActiveModal] = useState<"add" | "edit" | "view" | null>(null);
+  const [activeModal, setActiveModal] = useState<"add" | "edit" | "view" | "sendStats" | null>(null);
   const [selectedEnrollment, setSelectedEnrollment] = useState<EnrollmentRecord | null>(null);
   const [statusFilter, setStatusFilter] = useState("");
   const [semesterFilter, setSemesterFilter] = useState("");
   const [entryMode, setEntryMode] = useState<"existing" | "new">("existing");
+  const [statsPreviewRows, setStatsPreviewRows] = useState<StatsPreviewRow[]>([]);
+  const [statsPreviewSheetRows, setStatsPreviewSheetRows] = useState<StatsPreviewSheetRow[]>([]);
+  const [isStatsPreviewLoading, setIsStatsPreviewLoading] = useState(false);
+  const [isSendingStats, setIsSendingStats] = useState(false);
+  const [statsSendState, setStatsSendState] = useState<{ kind: "success" | "error"; message: string } | null>(null);
 
   const filteredEnrollments = useMemo(
     () =>
@@ -111,9 +143,99 @@ export function EnrollmentsTablePanel({
     [enrollments, semesterFilter, statusFilter]
   );
 
+  const numericStatsPreviewRows = useMemo(
+    () =>
+      statsPreviewRows.filter((row) => {
+        const value = Number(row.value);
+        return Number.isFinite(value);
+      }),
+    [statsPreviewRows]
+  );
+
   const semesters = Array.from(
     new Set(enrollments.map((item) => item.semester).filter((value): value is string => Boolean(value)))
   );
+
+  async function openStatsModal() {
+    setActiveModal("sendStats");
+    setIsStatsPreviewLoading(true);
+    setStatsSendState(null);
+
+    try {
+      const response = await fetch("/api/integrations?resource=enrollment-statistics", {
+        credentials: "same-origin"
+      });
+      const payload = await parseResponse(response);
+
+      if (!response.ok || !payload?.ok) {
+        throw new Error(payload?.error ?? payload?.message ?? "Failed to load enrollment statistics.");
+      }
+
+      setStatsPreviewRows(buildStatsPreviewRows(payload));
+      setStatsPreviewSheetRows(
+        buildStatsPreviewRows(payload).map((row) => ({
+          metric: row.label,
+          current_value: Number(row.value ?? 0),
+          office: "PMED",
+          report_type: "Enrollment Statistics"
+        }))
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to load enrollment statistics.";
+      setStatsPreviewRows([{ label: "Error", value: message }]);
+      setStatsPreviewSheetRows([]);
+    } finally {
+      setIsStatsPreviewLoading(false);
+    }
+  }
+
+  async function confirmSendStats() {
+    setIsSendingStats(true);
+    setStatsSendState(null);
+
+    try {
+      const response = await fetch("/api/integrations", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          action: "deliver",
+          resource: "enrollment-statistics"
+        })
+      });
+      const payload = await parseResponse(response);
+
+      if (!response.ok || !payload?.ok) {
+        throw new Error(payload?.error ?? payload?.message ?? "Failed to send enrollment statistics to PMED.");
+      }
+
+      const nextRows = buildStatsPreviewRows(payload?.data);
+      setStatsPreviewRows(nextRows);
+      setStatsPreviewSheetRows(
+        nextRows.map((row) => ({
+          metric: row.label,
+          current_value: Number(row.value ?? 0),
+          office: "PMED",
+          report_type: "Enrollment Statistics"
+        }))
+      );
+      setStatsSendState({
+        kind: "success",
+        message: "Enrollment statistics were sent to PMED."
+      });
+      setActiveModal(null);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to send enrollment statistics to PMED.";
+      setStatsSendState({
+        kind: "error",
+        message
+      });
+    } finally {
+      setIsSendingStats(false);
+    }
+  }
 
   return (
     <>
@@ -153,11 +275,20 @@ export function EnrollmentsTablePanel({
           </div>
         </label>
         <div className="actions-row align-end">
+          <button className="secondary" type="button" onClick={() => void openStatsModal()}>
+            Send to PMED
+          </button>
           <button className="primary" type="button" onClick={() => setActiveModal("add")}>
             Enroll Student
           </button>
         </div>
       </div>
+
+      {statsSendState ? (
+        <div className={statsSendState.kind === "success" ? "success-banner" : "error-banner"} role="status">
+          {statsSendState.message}
+        </div>
+      ) : null}
 
       <DataTable headers={["Student", "Class", "Academic Year", "Semester", "Status", "Downpayment", "Actions"]} showSearch={false}>
         {filteredEnrollments.map((item) => (
@@ -512,6 +643,106 @@ export function EnrollmentsTablePanel({
                   <div className="status-row"><span>Total Assessment</span><strong>{peso((selectedEnrollment.tuition_fee ?? TUITION_FEE) + (selectedEnrollment.downpayment_amount ?? DOWNPAYMENT_FEE) + (selectedEnrollment.medical_fee ?? MEDICAL_FEE) + (selectedEnrollment.id_fee ?? ID_FEE))}</strong></div>
                 </div>
               </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {activeModal === "sendStats" ? (
+        <div className="modal-backdrop" role="presentation" onClick={() => !isSendingStats && setActiveModal(null)}>
+          <div className="modal-card" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-head">
+              <div>
+                <div className="eyebrow">PMED Integration</div>
+                <h3>Send Enrollment Statistics</h3>
+                <p>Review the current registrar enrollment statistics before sending them to PMED.</p>
+              </div>
+              <button className="secondary compact-button" type="button" onClick={() => setActiveModal(null)} disabled={isSendingStats}>
+                Close
+              </button>
+            </div>
+
+            {isStatsPreviewLoading ? (
+              <div className="integration-preview top-gap">Loading enrollment statistics...</div>
+            ) : (
+              <>
+                <div className="report-grid top-gap">
+                  {statsPreviewRows.map((row) => (
+                    <div key={row.label} className="report-card">
+                      <div className="eyebrow">Enrollment Statistics</div>
+                      <h3>{row.label}</h3>
+                      <div className="status-stack top-gap">
+                        <div className="status-row">
+                          <span>Current Value</span>
+                          <strong>{row.value}</strong>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="section-card soft-panel top-gap">
+                  <div className="section-head">
+                    <div>
+                      <h2>Statistics Graph</h2>
+                      <p>Visual chart preview of the current registrar counts that will be sent to PMED.</p>
+                    </div>
+                  </div>
+                  <div className="mini-chart">
+                    {numericStatsPreviewRows.map((row) => {
+                      const numericValue = Number(row.value ?? 0);
+                      const highestValue = Math.max(
+                        1,
+                        ...numericStatsPreviewRows.map((entry) => Number(entry.value ?? 0))
+                      );
+
+                      return (
+                        <div key={`chart-${row.label}`} className="mini-chart-row">
+                          <span>{row.label}</span>
+                          <div className="mini-chart-bar">
+                            <div
+                              className="mini-chart-fill"
+                              style={{ width: `${Math.max(10, (numericValue / highestValue) * 100)}%` }}
+                            />
+                          </div>
+                          <strong>{row.value}</strong>
+                        </div>
+                      );
+                    })}
+                    {numericStatsPreviewRows.length === 0 ? (
+                      <div className="field-hint">No graph data is available right now.</div>
+                    ) : null}
+                  </div>
+                </div>
+
+                <div className="section-card soft-panel top-gap">
+                  <div className="section-head">
+                    <div>
+                      <h2>Excel View</h2>
+                      <p>Spreadsheet-style PMED report preview of the enrollment statistics.</p>
+                    </div>
+                  </div>
+                  <DataTable headers={["Metric", "Current Value", "Office", "Report Type"]} showSearch={false}>
+                    {statsPreviewSheetRows.map((row) => (
+                      <tr key={`sheet-${row.metric}`}>
+                        <td>{row.metric}</td>
+                        <td>{row.current_value}</td>
+                        <td>{row.office}</td>
+                        <td>{row.report_type}</td>
+                      </tr>
+                    ))}
+                  </DataTable>
+                </div>
+              </>
+            )}
+
+            <div className="modal-actions top-gap">
+              <button className="secondary inline-button" type="button" onClick={() => setActiveModal(null)} disabled={isSendingStats}>
+                Cancel
+              </button>
+              <button className="primary inline-button" type="button" onClick={() => void confirmSendStats()} disabled={isStatsPreviewLoading || isSendingStats}>
+                {isSendingStats ? "Sending..." : "Confirm Send"}
+              </button>
             </div>
           </div>
         </div>
