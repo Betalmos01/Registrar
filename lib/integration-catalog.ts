@@ -137,6 +137,17 @@ export const integrationCatalog: IntegrationCatalogEntry[] = [
     consumers: ["PMED"],
     systemFolders: ["Registrar"],
     uiMode: "api"
+  },
+  {
+    key: "report-queue",
+    label: "Report Queue",
+    direction: "outgoing",
+    office: "PMED",
+    method: "GET",
+    description: "PMED can pull current registrar report queue entries for planning and monitoring.",
+    consumers: ["PMED"],
+    systemFolders: ["Registrar"],
+    uiMode: "api"
   }
 ];
 

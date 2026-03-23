@@ -4,5 +4,6 @@
   "/(protected)/staff/enrollments/page": "app/(protected)/staff/enrollments/page.js",
   "/(protected)/staff/grades/page": "app/(protected)/staff/grades/page.js",
   "/(protected)/staff/instructors/page": "app/(protected)/staff/instructors/page.js",
-  "/(protected)/staff/students/page": "app/(protected)/staff/students/page.js"
+  "/(protected)/staff/students/page": "app/(protected)/staff/students/page.js",
+  "/api/[resource]/route": "app/api/[resource]/route.js"
 }

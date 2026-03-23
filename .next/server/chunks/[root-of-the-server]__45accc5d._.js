@@ -71,7 +71,8 @@ const schema = __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$z
     CLINIC_STUDENT_PERSONAL_INFO_ENDPOINT: __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$zod$2f$v3$2f$external$2e$js__$5b$app$2d$route$5d$__$28$ecmascript$29$__$3c$export__$2a$__as__z$3e$__["z"].string().default(""),
     GUIDANCE_STUDENT_PERSONAL_INFO_ENDPOINT: __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$zod$2f$v3$2f$external$2e$js__$5b$app$2d$route$5d$__$28$ecmascript$29$__$3c$export__$2a$__as__z$3e$__["z"].string().default(""),
     GUIDANCE_STUDENT_ACADEMIC_RECORDS_ENDPOINT: __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$zod$2f$v3$2f$external$2e$js__$5b$app$2d$route$5d$__$28$ecmascript$29$__$3c$export__$2a$__as__z$3e$__["z"].string().default(""),
-    PMED_ENROLLMENT_STATISTICS_ENDPOINT: __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$zod$2f$v3$2f$external$2e$js__$5b$app$2d$route$5d$__$28$ecmascript$29$__$3c$export__$2a$__as__z$3e$__["z"].string().default("")
+    PMED_ENROLLMENT_STATISTICS_ENDPOINT: __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$zod$2f$v3$2f$external$2e$js__$5b$app$2d$route$5d$__$28$ecmascript$29$__$3c$export__$2a$__as__z$3e$__["z"].string().default(""),
+    PMED_REPORT_QUEUE_ENDPOINT: __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$zod$2f$v3$2f$external$2e$js__$5b$app$2d$route$5d$__$28$ecmascript$29$__$3c$export__$2a$__as__z$3e$__["z"].string().default("")
 });
 const env = schema.parse({
     DATABASE_URL: process.env.DATABASE_URL,
@@ -85,7 +86,8 @@ const env = schema.parse({
     CLINIC_STUDENT_PERSONAL_INFO_ENDPOINT: process.env.CLINIC_STUDENT_PERSONAL_INFO_ENDPOINT ?? "",
     GUIDANCE_STUDENT_PERSONAL_INFO_ENDPOINT: process.env.GUIDANCE_STUDENT_PERSONAL_INFO_ENDPOINT ?? "",
     GUIDANCE_STUDENT_ACADEMIC_RECORDS_ENDPOINT: process.env.GUIDANCE_STUDENT_ACADEMIC_RECORDS_ENDPOINT ?? "",
-    PMED_ENROLLMENT_STATISTICS_ENDPOINT: process.env.PMED_ENROLLMENT_STATISTICS_ENDPOINT ?? ""
+    PMED_ENROLLMENT_STATISTICS_ENDPOINT: process.env.PMED_ENROLLMENT_STATISTICS_ENDPOINT ?? "",
+    PMED_REPORT_QUEUE_ENDPOINT: process.env.PMED_REPORT_QUEUE_ENDPOINT ?? ""
 });
 }),
 "[externals]/pg [external] (pg, esm_import)", ((__turbopack_context__) => {
@@ -132,10 +134,13 @@ const tableExistsCache = new Map();
 const columnExistsCache = new Map();
 const tableExistsPromiseCache = new Map();
 const columnExistsPromiseCache = new Map();
-const DB_POOL_MAX = Number(process.env.DB_POOL_MAX ?? 10);
-const DB_CONNECTION_TIMEOUT_MS = Number(process.env.DB_CONNECTION_TIMEOUT_MS ?? 30000);
-const DB_IDLE_TIMEOUT_MS = Number(process.env.DB_IDLE_TIMEOUT_MS ?? 30000);
-const DB_QUERY_CONCURRENCY = Number(process.env.DB_QUERY_CONCURRENCY ?? 4);
+const tableNameResolveCache = new Map();
+const tableNameResolvePromiseCache = new Map();
+const IS_SUPABASE = /supabase\.(co|in)/i.test(String(__TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$env$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["env"].DATABASE_URL ?? ""));
+const DB_POOL_MAX = Number(process.env.DB_POOL_MAX ?? (IS_SUPABASE ? 5 : 10));
+const DB_CONNECTION_TIMEOUT_MS = Number(process.env.DB_CONNECTION_TIMEOUT_MS ?? (IS_SUPABASE ? 10000 : 30000));
+const DB_IDLE_TIMEOUT_MS = Number(process.env.DB_IDLE_TIMEOUT_MS ?? (IS_SUPABASE ? 10000 : 30000));
+const DB_QUERY_CONCURRENCY = Number(process.env.DB_QUERY_CONCURRENCY ?? (IS_SUPABASE ? 2 : 4));
 let activeQueryCount = 0;
 const queryWaitQueue = [];
 function isTransientPoolTimeoutError(error) {
@@ -234,19 +239,35 @@ async function hasTable(tableName, schema = "public") {
     }
 }
 async function resolveTableName(...tableNames) {
-    for (const tableName of tableNames){
-        if (await hasTable(tableName)) {
-            return tableName;
-        }
+    const cacheKey = tableNames.join("|");
+    const cached = tableNameResolveCache.get(cacheKey);
+    if (typeof cached !== "undefined") {
+        return cached;
     }
-    return null;
+    const pending = tableNameResolvePromiseCache.get(cacheKey);
+    if (pending) {
+        return pending;
+    }
+    const lookupPromise = (async ()=>{
+        for (const tableName of tableNames){
+            if (await hasTable(tableName)) {
+                tableNameResolveCache.set(cacheKey, tableName);
+                return tableName;
+            }
+        }
+        tableNameResolveCache.set(cacheKey, null);
+        return null;
+    })();
+    tableNameResolvePromiseCache.set(cacheKey, lookupPromise);
+    try {
+        return await lookupPromise;
+    } finally{
+        tableNameResolvePromiseCache.delete(cacheKey);
+    }
 }
 async function hasColumn(tableName, columnName, schema = "public") {
-    const [resolvedSchema, resolvedTable] = tableName.includes(".") ? tableName.split(".", 2) : [
-        schema,
-        tableName
-    ];
-    const cacheKey = `${resolvedSchema}.${resolvedTable}.${columnName}`;
+    const qualifiedName = tableName.includes(".") ? tableName : `${schema}.${tableName}`;
+    const cacheKey = `${qualifiedName}.${columnName}`;
     const cached = columnExistsCache.get(cacheKey);
     if (typeof cached === "boolean") {
         return cached;
@@ -256,14 +277,14 @@ async function hasColumn(tableName, columnName, schema = "public") {
         return pending;
     }
     const lookupPromise = (async ()=>{
-        const exists = await queryValue(`select column_name
-       from information_schema.columns
-       where table_schema = $1
-         and table_name = $2
-         and column_name = $3
-       limit 1`, [
-            resolvedSchema,
-            resolvedTable,
+        const exists = await queryValue(`select exists(
+         select 1
+         from pg_attribute
+         where attrelid = to_regclass($1)
+           and attname = $2
+           and not attisdropped
+       )`, [
+            qualifiedName,
             columnName
         ]);
         const present = Boolean(exists);
@@ -971,6 +992,21 @@ const integrationCatalog = [
             "Registrar"
         ],
         uiMode: "api"
+    },
+    {
+        key: "report-queue",
+        label: "Report Queue",
+        direction: "outgoing",
+        office: "PMED",
+        method: "GET",
+        description: "PMED can pull current registrar report queue entries for planning and monitoring.",
+        consumers: [
+            "PMED"
+        ],
+        systemFolders: [
+            "Registrar"
+        ],
+        uiMode: "api"
     }
 ];
 function buildIntegrationManifest(basePath = "/api/integrations") {
@@ -1048,6 +1084,8 @@ __turbopack_context__.s([
     ()=>listStaffDirectory,
     "listStudents",
     ()=>listStudents,
+    "listStudentsBasic",
+    ()=>listStudentsBasic,
     "listUsers",
     ()=>listUsers,
     "normalizeRole",
@@ -1266,8 +1304,13 @@ async function listStudents(search = "", program = "", year = "") {
     const incomingDetails = await getStudentIncomingIntegrationDetails(students.map((student)=>({
             id: Number(student.id)
         })));
+    const enrollmentStatuses = await getStudentLatestEnrollmentStatuses(students.map((student)=>({
+            id: Number(student.id),
+            student_no: String(student.student_no ?? "")
+        })));
     return students.map((student)=>({
             ...student,
+            enrollment_status: enrollmentStatuses.get(Number(student.id)) ?? "Not Enrolled",
             payment_status: paymentStatuses.get(String(student.student_no ?? "").trim()) ?? "Pending",
             ...incomingStatuses.get(Number(student.id)) ?? {
                 medical_clearance_status: "Pending",
@@ -1277,6 +1320,68 @@ async function listStudents(search = "", program = "", year = "") {
             },
             ...incomingDetails.get(Number(student.id)) ?? {}
         }));
+}
+async function listStudentsBasic() {
+    const studentsTable = await getStudentsTable();
+    if (!studentsTable) {
+        return [];
+    }
+    return (0, __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["query"])(`select id, student_no, first_name, last_name, program, year_level
+     from ${studentsTable}
+     order by last_name, first_name, student_no`);
+}
+async function getStudentLatestEnrollmentStatuses(students) {
+    const statusMap = new Map();
+    if (students.length === 0) {
+        return statusMap;
+    }
+    const enrollmentsTable = await getEnrollmentsTable();
+    if (!enrollmentsTable) {
+        return statusMap;
+    }
+    const studentIds = students.map((student)=>Number(student.id)).filter((value)=>Number.isFinite(value));
+    if (studentIds.length === 0) {
+        return statusMap;
+    }
+    const hasDeletedAt = await (0, __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["hasColumn"])(enrollmentsTable, "deleted_at");
+    const enrollmentRows = await (0, __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["query"])(`select distinct on (student_id) student_id, status
+     from ${enrollmentsTable}
+     where student_id = any($1)
+     ${hasDeletedAt ? "and deleted_at is null" : ""}
+     order by student_id, created_at desc nulls last, id desc`, [
+        studentIds
+    ]);
+    enrollmentRows.forEach((row)=>{
+        const normalized = String(row.status ?? "").trim();
+        if (normalized) {
+            statusMap.set(Number(row.student_id), normalized);
+        }
+    });
+    const cashierFeedTable = await (0, __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["resolveTableName"])("cashier_registrar_student_enrollment_feed");
+    if (cashierFeedTable) {
+        const studentNos = students.map((student)=>String(student.student_no ?? "").trim()).filter(Boolean);
+        if (studentNos.length > 0) {
+            const feedRows = await (0, __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["query"])(`select distinct on (student_no) student_no, status
+         from ${cashierFeedTable}
+         where student_no = any($1)
+         order by student_no, coalesce(action_at, sent_at, created_at) desc nulls last, id desc`, [
+                studentNos
+            ]);
+            const studentIdByNo = new Map(students.map((student)=>[
+                    String(student.student_no ?? "").trim(),
+                    Number(student.id)
+                ]));
+            feedRows.forEach((row)=>{
+                const studentId = studentIdByNo.get(String(row.student_no ?? "").trim());
+                if (!studentId) return;
+                const normalized = String(row.status ?? "").trim();
+                if (normalized) {
+                    statusMap.set(studentId, normalized);
+                }
+            });
+        }
+    }
+    return statusMap;
 }
 function normalizePaymentStatus(status) {
     const normalized = String(status ?? "").trim().toLowerCase();
@@ -1739,8 +1844,8 @@ async function listEnrollments() {
             ${hasDownpaymentAmountColumn ? "enrollments.downpayment_amount," : "0::numeric as downpayment_amount,"}
             ${hasMedicalFeeColumn ? "enrollments.medical_fee," : "0::numeric as medical_fee,"}
             ${hasIdFeeColumn ? "enrollments.id_fee," : "0::numeric as id_fee,"}
-            students.student_no, students.first_name, students.last_name,
-            classes.class_code, classes.title
+            students.student_no, students.first_name, students.last_name, students.program, students.year_level,
+            classes.class_code, classes.title, classes.course
      from ${enrollmentsTable} as enrollments
      join ${studentsTable} as students on students.id = enrollments.student_id
      join ${classesTable} as classes on classes.id = enrollments.class_id
@@ -1783,7 +1888,14 @@ async function listGrades() {
     }
     return (0, __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["query"])(`select grades.id, grades.student_id, grades.class_id, ${await (0, __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["hasColumn"])(gradesTable, "semester") ? "coalesce(grades.semester, '')" : "''"} as semester, grades.grade, grades.remarks,
             students.student_no, students.first_name, students.last_name,
-            classes.class_code, classes.title
+            classes.class_code, classes.title,
+            avg(
+              case
+                when trim(coalesce(grades.grade, '')) ~ '^[0-9]+(\.[0-9]+)?$'
+                then cast(grades.grade as numeric)
+                else null
+              end
+            ) over (partition by grades.student_id) as student_average
      from ${gradesTable} as grades
      join ${studentsTable} as students on students.id = grades.student_id
      join ${classesTable} as classes on classes.id = grades.class_id
@@ -2153,7 +2265,7 @@ async function getExportRows(workflowKey = "") {
                     "Details",
                     "Created"
                 ],
-                rows: auditLogsTable ? await (0, __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["query"])(`select coalesce(concat(users.first_name, ' ', users.last_name), 'System') as user_name,
+                rows: auditLogsTable ? await (0, __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["query"])(`select coalesce(nullif(trim(users.full_name), ''), nullif(trim(users.username), ''), 'System') as user_name,
                   audit_logs.action,
                   audit_logs.module,
                   audit_logs.details,
@@ -2199,10 +2311,12 @@ var __turbopack_async_dependencies__ = __turbopack_handle_async_dependencies__([
 async function getIntegrationPayload(resource, options = {}) {
     const studentNo = String(options.studentNo ?? "").trim();
     const studentId = Number(options.studentId ?? 0);
+    const reportId = Number(options.reportId ?? 0);
     const studentsTable = await (0, __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["resolveTableName"])("registrar_students", "students");
     const enrollmentsTable = await (0, __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["resolveTableName"])("registrar.enrollments", "registrar_enrollments", "enrollments");
     const classesTable = await (0, __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["resolveTableName"])("registrar_classes", "classes");
     const gradesTable = await (0, __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["resolveTableName"])("registrar_grades", "grades");
+    const reportsTable = await (0, __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["resolveTableName"])("reports", "registrar_reports");
     const incomingRecordTypeMap = {
         "payment-confirmations": "payment_confirmation",
         "medical-clearances": "medical_clearance",
@@ -2263,6 +2377,97 @@ async function getIntegrationPayload(resource, options = {}) {
        limit 400`);
         return {
             rows: rows.rows
+        };
+    }
+    if (resource === "report-queue") {
+        if (!reportsTable) {
+            return {
+                rows: []
+            };
+        }
+        const reportFilterSql = Number.isFinite(reportId) && reportId > 0 ? " and id = $1" : "";
+        const reportFilterParams = Number.isFinite(reportId) && reportId > 0 ? [
+            reportId
+        ] : [];
+        const rows = await __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["pool"].query(`select
+         id,
+         coalesce(title, '')::text as title,
+         'PMED'::text as department,
+         coalesce(status, 'Pending')::text as status,
+         coalesce(due_date::text, '')::text as due_date,
+         coalesce(created_at::text, now()::text) as created_at
+       from ${reportsTable}
+       where upper(trim(coalesce(department, ''))) = 'PMED'${reportFilterSql}
+       order by created_at desc nulls last, id desc`, reportFilterParams);
+        const studentStatusRows = studentsTable ? await __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["pool"].query(`select
+             coalesce(nullif(trim(status), ''), 'Unknown')::text as status,
+             count(*)::int as count
+           from ${studentsTable}
+           group by 1
+           order by 2 desc, 1 asc`) : {
+            rows: []
+        };
+        const gradeSummaryRows = gradesTable ? await __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["pool"].query(`select
+             count(*)::int as total_grade_records,
+             count(distinct student_id)::int as distinct_students
+           from ${gradesTable}`) : {
+            rows: [
+                {
+                    total_grade_records: 0,
+                    distinct_students: 0
+                }
+            ]
+        };
+        const hasGradeSemesterColumn = gradesTable ? await (0, __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["hasColumn"])(gradesTable, "semester") : false;
+        const semesterSelect = hasGradeSemesterColumn ? "coalesce(grades.semester, '')::text as semester," : "''::text as semester,";
+        const recentGradeRows = gradesTable && studentsTable && classesTable ? await __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["pool"].query(`select
+               grades.id,
+               coalesce(students.student_no, '')::text as student_no,
+               trim(concat_ws(' ', coalesce(students.first_name, ''), coalesce(students.last_name, '')))::text as student_name,
+               coalesce(classes.class_code, '')::text as class_code,
+               coalesce(classes.title, '')::text as subject_title,
+               ${semesterSelect}
+               coalesce(grades.grade, '')::text as grade,
+               coalesce(grades.remarks, '')::text as remarks,
+               coalesce(grades.created_at::text, now()::text) as created_at
+             from ${gradesTable} as grades
+             left join ${studentsTable} as students on students.id = grades.student_id
+             left join ${classesTable} as classes on classes.id = grades.class_id
+             order by grades.created_at desc nulls last, grades.id desc
+             limit 50`) : {
+            rows: []
+        };
+        const workflowKeys = Object.keys(__TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$data$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["workflowTemplates"]);
+        const workflowSnapshots = await Promise.all(workflowKeys.map(async (workflowKey)=>{
+            const exportData = await (0, __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$data$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["getExportRows"])(workflowKey);
+            const rows = Array.isArray(exportData?.rows) ? exportData.rows : [];
+            return {
+                workflow_key: workflowKey,
+                label: __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$data$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["workflowTemplates"][workflowKey].label,
+                title: exportData.title,
+                columns: exportData.columns,
+                total_rows: rows.length,
+                rows
+            };
+        }));
+        return {
+            rows: rows.rows,
+            report_summary: {
+                total_reports: Number(rows.rows.length),
+                sent_department: "PMED",
+                workflow_reports_total: workflowSnapshots.length,
+                workflow_rows_total: workflowSnapshots.reduce((sum, item)=>sum + Number(item.total_rows ?? 0), 0)
+            },
+            registrar_snapshot: {
+                student_statuses: studentStatusRows.rows,
+                grade_records: {
+                    total: Number(gradeSummaryRows.rows[0]?.total_grade_records ?? 0),
+                    distinct_students: Number(gradeSummaryRows.rows[0]?.distinct_students ?? 0),
+                    recent_rows: recentGradeRows.rows
+                },
+                workflow_reports: workflowSnapshots
+            },
+            generated_at: new Date().toISOString()
         };
     }
     const student = studentNo ? studentsTable ? await (0, __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["queryOne"])(`select * from ${studentsTable} where student_no = $1 limit 1`, [
@@ -2381,7 +2586,9 @@ function readTargets(resource) {
                 consumer: "PMED",
                 url: __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$env$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["env"].PMED_ENROLLMENT_STATISTICS_ENDPOINT
             } : null
-        ].filter(Boolean)
+        ].filter(Boolean),
+        // PMED report queue delivery is database-backed only.
+        "report-queue": []
     };
     return targetMap[resource] ?? [];
 }
@@ -2459,9 +2666,64 @@ async function persistPmedEnrollmentStatistics(payload) {
         table: "public.pmed_enrollment_statistics_feed"
     };
 }
+async function persistPmedReportQueue(payload) {
+    const batchId = crypto.randomUUID();
+    const sentAt = new Date().toISOString();
+    const rows = Array.isArray(payload?.rows) ? payload.rows : [];
+    const studentStatuses = Array.isArray(payload?.registrar_snapshot?.student_statuses) ? payload.registrar_snapshot.student_statuses : [];
+    const gradeRecordsTotal = Number(payload?.registrar_snapshot?.grade_records?.total ?? 0);
+    const client = await __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["pool"].connect();
+    try {
+        await client.query("begin");
+        await client.query(`
+      create table if not exists public.pmed_report_queue_feed (
+        id bigserial primary key,
+        batch_id text not null,
+        source text not null default 'Registrar',
+        office text not null default 'PMED',
+        report_count integer not null default 0,
+        student_statuses jsonb not null default '[]'::jsonb,
+        total_grade_records integer not null default 0,
+        payload jsonb not null default '{}'::jsonb,
+        sent_at timestamptz not null default current_timestamp,
+        created_at timestamptz not null default current_timestamp
+      )
+    `);
+        await client.query(`
+      create index if not exists pmed_report_queue_feed_batch_idx
+      on public.pmed_report_queue_feed (batch_id, sent_at desc)
+    `);
+        await client.query(`insert into public.pmed_report_queue_feed
+        (batch_id, source, office, report_count, student_statuses, total_grade_records, payload, sent_at, created_at)
+       values ($1, $2, $3, $4, $5::jsonb, $6, $7::jsonb, $8::timestamptz, current_timestamp)`, [
+            batchId,
+            "Registrar",
+            "PMED",
+            rows.length,
+            JSON.stringify(studentStatuses),
+            gradeRecordsTotal,
+            JSON.stringify(payload ?? {}),
+            sentAt
+        ]);
+        await client.query("commit");
+    } catch (error) {
+        await client.query("rollback");
+        throw error;
+    } finally{
+        client.release();
+    }
+    return {
+        batch_id: batchId,
+        sent_at: sentAt,
+        row_count: 1,
+        table: "public.pmed_report_queue_feed",
+        report_count: rows.length,
+        total_grade_records: gradeRecordsTotal
+    };
+}
 async function deliverIntegrationResource(resource, options) {
     const payload = await (0, __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$integration$2d$payload$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["getIntegrationPayload"])(resource, options);
-    const persisted = resource === "enrollment-statistics" ? await persistPmedEnrollmentStatistics(payload) : null;
+    const persisted = resource === "enrollment-statistics" ? await persistPmedEnrollmentStatistics(payload) : resource === "report-queue" ? await persistPmedReportQueue(payload) : null;
     const targets = readTargets(resource);
     if (targets.length === 0) {
         return {
@@ -3816,9 +4078,48 @@ async function purgeEnrollment(input) {
 }
 async function createGrade(input) {
     const gradesTable = await requireGradesTable();
-    const result = await __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["pool"].query(`insert into ${gradesTable} (student_id, class_id, grade, remarks, created_at)
-     values ($1, $2, $3, $4, current_timestamp)
-     returning id`, [
+    const hasSemester = await (0, __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["hasColumn"])(gradesTable, "semester");
+    const existing = await (0, __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["queryOne"])(`select id
+     from ${gradesTable}
+     where student_id = $1 and class_id = $2
+     order by created_at desc nulls last, id desc
+     limit 1`, [
+        input.studentId,
+        input.classId
+    ]);
+    if (existing?.id) {
+        if (hasSemester) {
+            await __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["pool"].query(`update ${gradesTable}
+         set semester = $1, grade = $2, remarks = $3
+         where id = $4`, [
+                input.semester ?? "",
+                input.grade,
+                input.remarks ?? "",
+                existing.id
+            ]);
+        } else {
+            await __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["pool"].query(`update ${gradesTable}
+         set grade = $1, remarks = $2
+         where id = $3`, [
+                input.grade,
+                input.remarks ?? "",
+                existing.id
+            ]);
+        }
+        await logAction(input.actorId, "Update", "Grades", `Updated existing subject grade for student ID ${input.studentId} in class ID ${input.classId}`);
+        return existing.id;
+    }
+    const result = hasSemester ? await __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["pool"].query(`insert into ${gradesTable} (student_id, class_id, semester, grade, remarks, created_at)
+         values ($1, $2, $3, $4, $5, current_timestamp)
+         returning id`, [
+        input.studentId,
+        input.classId,
+        input.semester ?? "",
+        input.grade,
+        input.remarks ?? ""
+    ]) : await __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["pool"].query(`insert into ${gradesTable} (student_id, class_id, grade, remarks, created_at)
+         values ($1, $2, $3, $4, current_timestamp)
+         returning id`, [
         input.studentId,
         input.classId,
         input.grade,
@@ -4223,6 +4524,7 @@ __turbopack_context__.s([
 ]);
 var __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$server$2e$js__$5b$app$2d$route$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/node_modules/next/server.js [app-route] (ecmascript)");
 var __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$env$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/lib/env.ts [app-route] (ecmascript)");
+var __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/lib/db.ts [app-route] (ecmascript)");
 var __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$department$2d$integration$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/lib/department-integration.ts [app-route] (ecmascript)");
 var __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$integration$2d$catalog$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/lib/integration-catalog.ts [app-route] (ecmascript)");
 var __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$integration$2d$delivery$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/lib/integration-delivery.ts [app-route] (ecmascript)");
@@ -4232,6 +4534,7 @@ var __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$data$2e$ts__$5b$app$2
 var __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$mutations$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/lib/mutations.ts [app-route] (ecmascript)");
 var __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$session$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__ = __turbopack_context__.i("[project]/lib/session.ts [app-route] (ecmascript)");
 var __turbopack_async_dependencies__ = __turbopack_handle_async_dependencies__([
+    __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__,
     __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$department$2d$integration$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__,
     __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$integration$2d$delivery$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__,
     __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$integration$2d$payload$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__,
@@ -4239,7 +4542,8 @@ var __turbopack_async_dependencies__ = __turbopack_handle_async_dependencies__([
     __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$data$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__,
     __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$mutations$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__
 ]);
-[__TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$department$2d$integration$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__, __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$integration$2d$delivery$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__, __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$integration$2d$payload$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__, __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$student$2d$data$2d$dispatch$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__, __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$data$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__, __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$mutations$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__] = __turbopack_async_dependencies__.then ? (await __turbopack_async_dependencies__)() : __turbopack_async_dependencies__;
+[__TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__, __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$department$2d$integration$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__, __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$integration$2d$delivery$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__, __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$integration$2d$payload$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__, __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$student$2d$data$2d$dispatch$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__, __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$data$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__, __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$mutations$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__] = __turbopack_async_dependencies__.then ? (await __turbopack_async_dependencies__)() : __turbopack_async_dependencies__;
+;
 ;
 ;
 ;
@@ -4404,7 +4708,8 @@ async function GET(request, context) {
                 ok: true,
                 data: await (0, __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$integration$2d$payload$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["getIntegrationPayload"])(integrationResource, {
                     studentNo: String(url.searchParams.get("student_no") ?? "").trim(),
-                    studentId: Number(url.searchParams.get("student_id") ?? 0)
+                    studentId: Number(url.searchParams.get("student_id") ?? 0),
+                    reportId: String(url.searchParams.get("report_id") ?? "").trim()
                 })
             });
         }
@@ -4579,10 +4884,22 @@ async function POST(request, context) {
                     ok: false,
                     error: "Unauthorized."
                 }, 401);
+                const reportId = Number(input.report_id ?? input.reportId ?? 0);
                 const result = await (0, __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$integration$2d$delivery$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["deliverIntegrationResource"])(integrationResource, {
                     studentNo: String(input.student_no ?? input.studentNo ?? "").trim(),
-                    studentId: Number(input.student_id ?? input.studentId ?? 0)
+                    studentId: Number(input.student_id ?? input.studentId ?? 0),
+                    reportId: String(input.report_id ?? input.reportId ?? "").trim()
                 });
+                if (result.ok && integrationResource === "report-queue" && reportId > 0) {
+                    const reportsTable = await (0, __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["resolveTableName"])("reports", "registrar_reports");
+                    if (reportsTable) {
+                        await __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$db$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["pool"].query(`update ${reportsTable}
+               set status = 'Completed'
+               where id = $1`, [
+                            reportId
+                        ]);
+                    }
+                }
                 return json({
                     ok: result.ok,
                     message: result.message,
@@ -4889,7 +5206,7 @@ async function POST(request, context) {
                     data: {
                         id: await (0, __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$mutations$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["createReport"])({
                             title: String(input.title ?? ""),
-                            department: String(input.department ?? ""),
+                            department: "PMED",
                             status: String(input.status ?? "Pending"),
                             dueDate: String(input.due_date ?? ""),
                             actorId: user.id
@@ -4902,7 +5219,7 @@ async function POST(request, context) {
                         id: await (0, __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$mutations$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["createWorkflowReport"])({
                             workflowKey: String(input.workflow_key ?? ""),
                             title: String(input.title ?? ""),
-                            department: String(input.department ?? ""),
+                            department: "PMED",
                             status: String(input.status ?? "Pending"),
                             dueDate: String(input.due_date ?? ""),
                             actorId: user.id
@@ -4914,7 +5231,7 @@ async function POST(request, context) {
                     message: (await (0, __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$mutations$2e$ts__$5b$app$2d$route$5d$__$28$ecmascript$29$__["updateReport"])({
                         id: Number(input.id ?? 0),
                         title: String(input.title ?? ""),
-                        department: String(input.department ?? ""),
+                        department: "PMED",
                         status: String(input.status ?? "Pending"),
                         dueDate: String(input.due_date ?? ""),
                         actorId: user.id

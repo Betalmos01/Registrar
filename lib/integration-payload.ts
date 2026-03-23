@@ -1,13 +1,18 @@
-import { pool, queryOne, queryValue, resolveTableName } from "@/lib/db";
-import { listIntegrationRecords, listStudents } from "@/lib/data";
+import { hasColumn, pool, queryOne, queryValue, resolveTableName } from "@/lib/db";
+import { getExportRows, listIntegrationRecords, listStudents, workflowTemplates } from "@/lib/data";
 
-export async function getIntegrationPayload(resource: string, options: { studentNo?: string; studentId?: number } = {}) {
+export async function getIntegrationPayload(
+  resource: string,
+  options: { studentNo?: string; studentId?: number; reportId?: string | number } = {}
+) {
   const studentNo = String(options.studentNo ?? "").trim();
   const studentId = Number(options.studentId ?? 0);
+  const reportId = Number(options.reportId ?? 0);
   const studentsTable = await resolveTableName("registrar_students", "students");
   const enrollmentsTable = await resolveTableName("registrar.enrollments", "registrar_enrollments", "enrollments");
   const classesTable = await resolveTableName("registrar_classes", "classes");
   const gradesTable = await resolveTableName("registrar_grades", "grades");
+  const reportsTable = await resolveTableName("reports", "registrar_reports");
   const incomingRecordTypeMap: Record<string, string> = {
     "payment-confirmations": "payment_confirmation",
     "medical-clearances": "medical_clearance",
@@ -67,6 +72,111 @@ export async function getIntegrationPayload(resource: string, options: { student
     );
 
     return { rows: rows.rows };
+  }
+
+  if (resource === "report-queue") {
+    if (!reportsTable) {
+      return { rows: [] };
+    }
+
+    const reportFilterSql = Number.isFinite(reportId) && reportId > 0 ? " and id = $1" : "";
+    const reportFilterParams = Number.isFinite(reportId) && reportId > 0 ? [reportId] : [];
+
+    const rows = await pool.query(
+      `select
+         id,
+         coalesce(title, '')::text as title,
+         'PMED'::text as department,
+         coalesce(status, 'Pending')::text as status,
+         coalesce(due_date::text, '')::text as due_date,
+         coalesce(created_at::text, now()::text) as created_at
+       from ${reportsTable}
+       where upper(trim(coalesce(department, ''))) = 'PMED'${reportFilterSql}
+       order by created_at desc nulls last, id desc`,
+      reportFilterParams
+    );
+
+    const studentStatusRows = studentsTable
+      ? await pool.query(
+          `select
+             coalesce(nullif(trim(status), ''), 'Unknown')::text as status,
+             count(*)::int as count
+           from ${studentsTable}
+           group by 1
+           order by 2 desc, 1 asc`
+        )
+      : { rows: [] as Array<{ status: string; count: number }> };
+
+    const gradeSummaryRows = gradesTable
+      ? await pool.query(
+          `select
+             count(*)::int as total_grade_records,
+             count(distinct student_id)::int as distinct_students
+           from ${gradesTable}`
+        )
+      : { rows: [{ total_grade_records: 0, distinct_students: 0 }] };
+
+    const hasGradeSemesterColumn = gradesTable ? await hasColumn(gradesTable, "semester") : false;
+    const semesterSelect = hasGradeSemesterColumn
+      ? "coalesce(grades.semester, '')::text as semester,"
+      : "''::text as semester,";
+
+    const recentGradeRows =
+      gradesTable && studentsTable && classesTable
+        ? await pool.query(
+            `select
+               grades.id,
+               coalesce(students.student_no, '')::text as student_no,
+               trim(concat_ws(' ', coalesce(students.first_name, ''), coalesce(students.last_name, '')))::text as student_name,
+               coalesce(classes.class_code, '')::text as class_code,
+               coalesce(classes.title, '')::text as subject_title,
+               ${semesterSelect}
+               coalesce(grades.grade, '')::text as grade,
+               coalesce(grades.remarks, '')::text as remarks,
+               coalesce(grades.created_at::text, now()::text) as created_at
+             from ${gradesTable} as grades
+             left join ${studentsTable} as students on students.id = grades.student_id
+             left join ${classesTable} as classes on classes.id = grades.class_id
+             order by grades.created_at desc nulls last, grades.id desc
+             limit 50`
+          )
+        : { rows: [] as Record<string, unknown>[] };
+
+    const workflowKeys = Object.keys(workflowTemplates) as Array<keyof typeof workflowTemplates>;
+    const workflowSnapshots = await Promise.all(
+      workflowKeys.map(async (workflowKey) => {
+        const exportData = await getExportRows(workflowKey);
+        const rows = Array.isArray(exportData?.rows) ? exportData.rows : [];
+        return {
+          workflow_key: workflowKey,
+          label: workflowTemplates[workflowKey].label,
+          title: exportData.title,
+          columns: exportData.columns,
+          total_rows: rows.length,
+          rows
+        };
+      })
+    );
+
+    return {
+      rows: rows.rows,
+      report_summary: {
+        total_reports: Number(rows.rows.length),
+        sent_department: "PMED",
+        workflow_reports_total: workflowSnapshots.length,
+        workflow_rows_total: workflowSnapshots.reduce((sum, item) => sum + Number(item.total_rows ?? 0), 0)
+      },
+      registrar_snapshot: {
+        student_statuses: studentStatusRows.rows,
+        grade_records: {
+          total: Number(gradeSummaryRows.rows[0]?.total_grade_records ?? 0),
+          distinct_students: Number(gradeSummaryRows.rows[0]?.distinct_students ?? 0),
+          recent_rows: recentGradeRows.rows
+        },
+        workflow_reports: workflowSnapshots
+      },
+      generated_at: new Date().toISOString()
+    };
   }
 
   const student = studentNo

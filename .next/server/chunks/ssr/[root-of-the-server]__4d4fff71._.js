@@ -26,7 +26,8 @@ const schema = __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$z
     CLINIC_STUDENT_PERSONAL_INFO_ENDPOINT: __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$zod$2f$v3$2f$external$2e$js__$5b$app$2d$rsc$5d$__$28$ecmascript$29$__$3c$export__$2a$__as__z$3e$__["z"].string().default(""),
     GUIDANCE_STUDENT_PERSONAL_INFO_ENDPOINT: __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$zod$2f$v3$2f$external$2e$js__$5b$app$2d$rsc$5d$__$28$ecmascript$29$__$3c$export__$2a$__as__z$3e$__["z"].string().default(""),
     GUIDANCE_STUDENT_ACADEMIC_RECORDS_ENDPOINT: __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$zod$2f$v3$2f$external$2e$js__$5b$app$2d$rsc$5d$__$28$ecmascript$29$__$3c$export__$2a$__as__z$3e$__["z"].string().default(""),
-    PMED_ENROLLMENT_STATISTICS_ENDPOINT: __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$zod$2f$v3$2f$external$2e$js__$5b$app$2d$rsc$5d$__$28$ecmascript$29$__$3c$export__$2a$__as__z$3e$__["z"].string().default("")
+    PMED_ENROLLMENT_STATISTICS_ENDPOINT: __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$zod$2f$v3$2f$external$2e$js__$5b$app$2d$rsc$5d$__$28$ecmascript$29$__$3c$export__$2a$__as__z$3e$__["z"].string().default(""),
+    PMED_REPORT_QUEUE_ENDPOINT: __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$zod$2f$v3$2f$external$2e$js__$5b$app$2d$rsc$5d$__$28$ecmascript$29$__$3c$export__$2a$__as__z$3e$__["z"].string().default("")
 });
 const env = schema.parse({
     DATABASE_URL: process.env.DATABASE_URL,
@@ -40,7 +41,8 @@ const env = schema.parse({
     CLINIC_STUDENT_PERSONAL_INFO_ENDPOINT: process.env.CLINIC_STUDENT_PERSONAL_INFO_ENDPOINT ?? "",
     GUIDANCE_STUDENT_PERSONAL_INFO_ENDPOINT: process.env.GUIDANCE_STUDENT_PERSONAL_INFO_ENDPOINT ?? "",
     GUIDANCE_STUDENT_ACADEMIC_RECORDS_ENDPOINT: process.env.GUIDANCE_STUDENT_ACADEMIC_RECORDS_ENDPOINT ?? "",
-    PMED_ENROLLMENT_STATISTICS_ENDPOINT: process.env.PMED_ENROLLMENT_STATISTICS_ENDPOINT ?? ""
+    PMED_ENROLLMENT_STATISTICS_ENDPOINT: process.env.PMED_ENROLLMENT_STATISTICS_ENDPOINT ?? "",
+    PMED_REPORT_QUEUE_ENDPOINT: process.env.PMED_REPORT_QUEUE_ENDPOINT ?? ""
 });
 }),
 "[project]/lib/session.ts [app-rsc] (ecmascript)", ((__turbopack_context__) => {
@@ -1602,7 +1604,7 @@ async function getExportRows(workflowKey = "") {
                     "Details",
                     "Created"
                 ],
-                rows: auditLogsTable ? await (0, __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$db$2e$ts__$5b$app$2d$rsc$5d$__$28$ecmascript$29$__["query"])(`select coalesce(concat(users.first_name, ' ', users.last_name), 'System') as user_name,
+                rows: auditLogsTable ? await (0, __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$db$2e$ts__$5b$app$2d$rsc$5d$__$28$ecmascript$29$__["query"])(`select coalesce(nullif(trim(users.full_name), ''), nullif(trim(users.username), ''), 'System') as user_name,
                   audit_logs.action,
                   audit_logs.module,
                   audit_logs.details,
@@ -2831,6 +2833,7 @@ const FIXED_TUITION_FEE = 6000;
 const FIXED_DOWNPAYMENT_AMOUNT = 500;
 const FIXED_MEDICAL_FEE = 250;
 const FIXED_ID_FEE = 250;
+const FIXED_REPORT_DEPARTMENT = "PMED";
 function parseCurrencyInput(value, fallback) {
     const parsed = Number(value ?? fallback);
     return Number.isFinite(parsed) ? parsed : fallback;
@@ -3365,7 +3368,7 @@ async function createReportAction(formData) {
     const user = await requireSessionUser();
     await (0, __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$mutations$2e$ts__$5b$app$2d$rsc$5d$__$28$ecmascript$29$__["createReport"])({
         title: String(formData.get("title") ?? "").trim(),
-        department: String(formData.get("department") ?? "").trim(),
+        department: FIXED_REPORT_DEPARTMENT,
         status: String(formData.get("status") ?? "Pending").trim() || "Pending",
         dueDate: String(formData.get("due_date") ?? "").trim(),
         actorId: user.id
@@ -3378,7 +3381,7 @@ async function createWorkflowReportAction(formData) {
     await (0, __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$mutations$2e$ts__$5b$app$2d$rsc$5d$__$28$ecmascript$29$__["createWorkflowReport"])({
         workflowKey: String(formData.get("workflow_key") ?? ""),
         title: String(formData.get("title") ?? "").trim(),
-        department: String(formData.get("department") ?? "").trim(),
+        department: FIXED_REPORT_DEPARTMENT,
         status: String(formData.get("status") ?? "Pending").trim() || "Pending",
         dueDate: String(formData.get("due_date") ?? "").trim(),
         actorId: user.id
@@ -3391,7 +3394,7 @@ async function updateReportAction(formData) {
     await (0, __TURBOPACK__imported__module__$5b$project$5d2f$lib$2f$mutations$2e$ts__$5b$app$2d$rsc$5d$__$28$ecmascript$29$__["updateReport"])({
         id: Number(formData.get("id") ?? 0),
         title: String(formData.get("title") ?? "").trim(),
-        department: String(formData.get("department") ?? "").trim(),
+        department: FIXED_REPORT_DEPARTMENT,
         status: String(formData.get("status") ?? "Pending").trim() || "Pending",
         dueDate: String(formData.get("due_date") ?? "").trim(),
         actorId: user.id

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { env } from "@/lib/env";
-import { resolveTableName } from "@/lib/db";
+import { pool, resolveTableName } from "@/lib/db";
 import {
   dispatchRegistrarDepartmentFlow,
   getRegistrarDepartmentFlowStatus,
@@ -200,7 +200,8 @@ export async function GET(request: Request, context: { params: Promise<{ resourc
         ok: true,
         data: await getIntegrationPayload(integrationResource, {
           studentNo: String(url.searchParams.get("student_no") ?? "").trim(),
-          studentId: Number(url.searchParams.get("student_id") ?? 0)
+          studentId: Number(url.searchParams.get("student_id") ?? 0),
+          reportId: String(url.searchParams.get("report_id") ?? "").trim()
         })
       });
     }
@@ -308,10 +309,24 @@ export async function POST(request: Request, context: { params: Promise<{ resour
         const user = await requireIntegrationAccess(request);
         if (!user) return json({ ok: false, error: "Unauthorized." }, 401);
 
+        const reportId = Number(input.report_id ?? input.reportId ?? 0);
         const result = await deliverIntegrationResource(integrationResource, {
           studentNo: String(input.student_no ?? input.studentNo ?? "").trim(),
-          studentId: Number(input.student_id ?? input.studentId ?? 0)
+          studentId: Number(input.student_id ?? input.studentId ?? 0),
+          reportId: String(input.report_id ?? input.reportId ?? "").trim()
         });
+
+        if (result.ok && integrationResource === "report-queue" && reportId > 0) {
+          const reportsTable = await resolveTableName("reports", "registrar_reports");
+          if (reportsTable) {
+            await pool.query(
+              `update ${reportsTable}
+               set status = 'Completed'
+               where id = $1`,
+              [reportId]
+            );
+          }
+        }
 
         return json({ ok: result.ok, message: result.message, data: result }, result.ok ? 200 : 422);
       }
@@ -377,9 +392,9 @@ export async function POST(request: Request, context: { params: Promise<{ resour
         if (action === "delete") return json({ ok: true, message: (await deleteUserAccount({ id: Number(input.id ?? 0), actorId: user.id }), "User deleted.") });
         break;
       case "reports":
-        if (action === "create") return json({ ok: true, data: { id: await createReport({ title: String(input.title ?? ""), department: String(input.department ?? ""), status: String(input.status ?? "Pending"), dueDate: String(input.due_date ?? ""), actorId: user.id }) } });
-        if (action === "create_workflow_report") return json({ ok: true, data: { id: await createWorkflowReport({ workflowKey: String(input.workflow_key ?? "") as never, title: String(input.title ?? ""), department: String(input.department ?? ""), status: String(input.status ?? "Pending"), dueDate: String(input.due_date ?? ""), actorId: user.id }) } });
-        if (action === "update") return json({ ok: true, message: (await updateReport({ id: Number(input.id ?? 0), title: String(input.title ?? ""), department: String(input.department ?? ""), status: String(input.status ?? "Pending"), dueDate: String(input.due_date ?? ""), actorId: user.id }), "Report updated.") });
+        if (action === "create") return json({ ok: true, data: { id: await createReport({ title: String(input.title ?? ""), department: "PMED", status: String(input.status ?? "Pending"), dueDate: String(input.due_date ?? ""), actorId: user.id }) } });
+        if (action === "create_workflow_report") return json({ ok: true, data: { id: await createWorkflowReport({ workflowKey: String(input.workflow_key ?? "") as never, title: String(input.title ?? ""), department: "PMED", status: String(input.status ?? "Pending"), dueDate: String(input.due_date ?? ""), actorId: user.id }) } });
+        if (action === "update") return json({ ok: true, message: (await updateReport({ id: Number(input.id ?? 0), title: String(input.title ?? ""), department: "PMED", status: String(input.status ?? "Pending"), dueDate: String(input.due_date ?? ""), actorId: user.id }), "Report updated.") });
         if (action === "delete") return json({ ok: true, message: (await deleteReport({ id: Number(input.id ?? 0), actorId: user.id }), "Report deleted.") });
         break;
       case "academic-reports":

@@ -26,7 +26,9 @@ function readTargets(resource: string): DeliveryTarget[] {
     ].filter(Boolean) as DeliveryTarget[],
     "enrollment-statistics": [
       env.PMED_ENROLLMENT_STATISTICS_ENDPOINT ? { consumer: "PMED", url: env.PMED_ENROLLMENT_STATISTICS_ENDPOINT } : null
-    ].filter(Boolean) as DeliveryTarget[]
+    ].filter(Boolean) as DeliveryTarget[],
+    // PMED report queue delivery is database-backed only.
+    "report-queue": []
   };
 
   return targetMap[resource] ?? [];
@@ -106,11 +108,79 @@ async function persistPmedEnrollmentStatistics(payload: any) {
   };
 }
 
-export async function deliverIntegrationResource(resource: string, options: { studentNo?: string; studentId?: number }) {
+async function persistPmedReportQueue(payload: any) {
+  const batchId = crypto.randomUUID();
+  const sentAt = new Date().toISOString();
+  const rows = Array.isArray(payload?.rows) ? payload.rows : [];
+  const studentStatuses = Array.isArray(payload?.registrar_snapshot?.student_statuses)
+    ? payload.registrar_snapshot.student_statuses
+    : [];
+  const gradeRecordsTotal = Number(payload?.registrar_snapshot?.grade_records?.total ?? 0);
+  const client = await pool.connect();
+
+  try {
+    await client.query("begin");
+    await client.query(`
+      create table if not exists public.pmed_report_queue_feed (
+        id bigserial primary key,
+        batch_id text not null,
+        source text not null default 'Registrar',
+        office text not null default 'PMED',
+        report_count integer not null default 0,
+        student_statuses jsonb not null default '[]'::jsonb,
+        total_grade_records integer not null default 0,
+        payload jsonb not null default '{}'::jsonb,
+        sent_at timestamptz not null default current_timestamp,
+        created_at timestamptz not null default current_timestamp
+      )
+    `);
+    await client.query(`
+      create index if not exists pmed_report_queue_feed_batch_idx
+      on public.pmed_report_queue_feed (batch_id, sent_at desc)
+    `);
+    await client.query(
+      `insert into public.pmed_report_queue_feed
+        (batch_id, source, office, report_count, student_statuses, total_grade_records, payload, sent_at, created_at)
+       values ($1, $2, $3, $4, $5::jsonb, $6, $7::jsonb, $8::timestamptz, current_timestamp)`,
+      [
+        batchId,
+        "Registrar",
+        "PMED",
+        rows.length,
+        JSON.stringify(studentStatuses),
+        gradeRecordsTotal,
+        JSON.stringify(payload ?? {}),
+        sentAt
+      ]
+    );
+    await client.query("commit");
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
+
+  return {
+    batch_id: batchId,
+    sent_at: sentAt,
+    row_count: 1,
+    table: "public.pmed_report_queue_feed",
+    report_count: rows.length,
+    total_grade_records: gradeRecordsTotal
+  };
+}
+
+export async function deliverIntegrationResource(
+  resource: string,
+  options: { studentNo?: string; studentId?: number; reportId?: string | number }
+) {
   const payload = await getIntegrationPayload(resource, options);
   const persisted =
     resource === "enrollment-statistics"
       ? await persistPmedEnrollmentStatistics(payload)
+      : resource === "report-queue"
+        ? await persistPmedReportQueue(payload)
       : null;
   const targets = readTargets(resource);
 

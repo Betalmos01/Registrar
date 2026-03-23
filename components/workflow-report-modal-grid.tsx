@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createWorkflowReportAction } from "@/lib/actions";
+import { DataTable } from "@/components/data-table";
 
 type WorkflowTemplate = {
   key: string;
@@ -16,6 +17,16 @@ type WorkflowReportModalGridProps = {
   templates: WorkflowTemplate[];
   workflowStats: Record<string, number>;
   reportsEnabled: boolean;
+};
+
+type StudentPreviewRow = {
+  id: number;
+  student_no: string;
+  first_name: string;
+  last_name: string;
+  program: string;
+  year_level: string;
+  status: string;
 };
 
 const reportStatuses = ["Pending", "In Review", "Completed"] as const;
@@ -32,11 +43,64 @@ export function WorkflowReportModalGrid({
   const [activeKey, setActiveKey] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [studentRows, setStudentRows] = useState<StudentPreviewRow[]>([]);
+  const [isStudentLoading, setIsStudentLoading] = useState(false);
+  const [studentError, setStudentError] = useState("");
 
   const activeTemplate = useMemo(
     () => templates.find((template) => template.key === activeKey) ?? null,
     [activeKey, templates]
   );
+
+  useEffect(() => {
+    if (!activeTemplate || activeTemplate.key !== "student-intake") {
+      setStudentRows([]);
+      setStudentError("");
+      setIsStudentLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadStudents() {
+      setIsStudentLoading(true);
+      setStudentError("");
+      try {
+        const response = await fetch("/api/students", {
+          method: "GET",
+          credentials: "same-origin",
+          cache: "no-store"
+        });
+        const payload = (await response.json()) as {
+          ok?: boolean;
+          error?: string;
+          data?: { students?: StudentPreviewRow[] };
+        };
+
+        if (!response.ok || !payload?.ok) {
+          throw new Error(payload?.error || "Failed to fetch student list.");
+        }
+
+        if (!cancelled) {
+          setStudentRows(Array.isArray(payload?.data?.students) ? payload.data.students : []);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setStudentRows([]);
+          setStudentError(error instanceof Error ? error.message : "Failed to fetch student list.");
+        }
+      } finally {
+        if (!cancelled) {
+          setIsStudentLoading(false);
+        }
+      }
+    }
+
+    void loadStudents();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTemplate]);
 
   return (
     <>
@@ -178,6 +242,33 @@ export function WorkflowReportModalGrid({
                 </button>
               </div>
             </form>
+
+            {activeTemplate.key === "student-intake" ? (
+              <div className="top-gap">
+                <div className="eyebrow">Student Intake Preview</div>
+                {isStudentLoading ? (
+                  <div className="integration-preview top-gap">Loading all students...</div>
+                ) : studentError ? (
+                  <div className="error-banner top-gap">{studentError}</div>
+                ) : (
+                  <DataTable
+                    headers={["Student No", "Student Name", "Program", "Year Level", "Status"]}
+                    emptyMessage="No students found."
+                    pageSize={10}
+                  >
+                    {studentRows.map((student) => (
+                      <tr key={student.id}>
+                        <td>{student.student_no || "-"}</td>
+                        <td>{`${student.last_name || ""}, ${student.first_name || ""}`.replace(/^,\s*/, "") || "-"}</td>
+                        <td>{student.program || "-"}</td>
+                        <td>{student.year_level || "-"}</td>
+                        <td>{student.status || "-"}</td>
+                      </tr>
+                    ))}
+                  </DataTable>
+                )}
+              </div>
+            ) : null}
           </div>
         </div>
       ) : null}

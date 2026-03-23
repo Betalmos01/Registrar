@@ -1048,7 +1048,7 @@
         }
       },
       "layer": {
-        "app/(protected)/admin/reports/page": "rsc"
+        "app/(protected)/admin/reports/page": "action-browser"
       },
       "filename": "lib/actions.ts",
       "exportedName": "deleteReportAction"

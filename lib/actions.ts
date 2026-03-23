@@ -97,6 +97,7 @@ const FIXED_TUITION_FEE = 6000;
 const FIXED_DOWNPAYMENT_AMOUNT = 500;
 const FIXED_MEDICAL_FEE = 250;
 const FIXED_ID_FEE = 250;
+const FIXED_REPORT_DEPARTMENT = "PMED";
 
 function parseCurrencyInput(value: FormDataEntryValue | null, fallback: number) {
   const parsed = Number(value ?? fallback);
@@ -660,7 +661,7 @@ export async function createReportAction(formData: FormData) {
   const user = await requireSessionUser();
   await createReport({
     title: String(formData.get("title") ?? "").trim(),
-    department: String(formData.get("department") ?? "").trim(),
+    department: FIXED_REPORT_DEPARTMENT,
     status: String(formData.get("status") ?? "Pending").trim() || "Pending",
     dueDate: String(formData.get("due_date") ?? "").trim(),
     actorId: user.id
@@ -674,7 +675,7 @@ export async function createWorkflowReportAction(formData: FormData) {
   await createWorkflowReport({
     workflowKey: String(formData.get("workflow_key") ?? "") as never,
     title: String(formData.get("title") ?? "").trim(),
-    department: String(formData.get("department") ?? "").trim(),
+    department: FIXED_REPORT_DEPARTMENT,
     status: String(formData.get("status") ?? "Pending").trim() || "Pending",
     dueDate: String(formData.get("due_date") ?? "").trim(),
     actorId: user.id
@@ -688,7 +689,7 @@ export async function updateReportAction(formData: FormData) {
   await updateReport({
     id: Number(formData.get("id") ?? 0),
     title: String(formData.get("title") ?? "").trim(),
-    department: String(formData.get("department") ?? "").trim(),
+    department: FIXED_REPORT_DEPARTMENT,
     status: String(formData.get("status") ?? "Pending").trim() || "Pending",
     dueDate: String(formData.get("due_date") ?? "").trim(),
     actorId: user.id

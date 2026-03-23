@@ -26,7 +26,8 @@ const schema = __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$z
     CLINIC_STUDENT_PERSONAL_INFO_ENDPOINT: __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$zod$2f$v3$2f$external$2e$js__$5b$app$2d$rsc$5d$__$28$ecmascript$29$__$3c$export__$2a$__as__z$3e$__["z"].string().default(""),
     GUIDANCE_STUDENT_PERSONAL_INFO_ENDPOINT: __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$zod$2f$v3$2f$external$2e$js__$5b$app$2d$rsc$5d$__$28$ecmascript$29$__$3c$export__$2a$__as__z$3e$__["z"].string().default(""),
     GUIDANCE_STUDENT_ACADEMIC_RECORDS_ENDPOINT: __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$zod$2f$v3$2f$external$2e$js__$5b$app$2d$rsc$5d$__$28$ecmascript$29$__$3c$export__$2a$__as__z$3e$__["z"].string().default(""),
-    PMED_ENROLLMENT_STATISTICS_ENDPOINT: __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$zod$2f$v3$2f$external$2e$js__$5b$app$2d$rsc$5d$__$28$ecmascript$29$__$3c$export__$2a$__as__z$3e$__["z"].string().default("")
+    PMED_ENROLLMENT_STATISTICS_ENDPOINT: __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$zod$2f$v3$2f$external$2e$js__$5b$app$2d$rsc$5d$__$28$ecmascript$29$__$3c$export__$2a$__as__z$3e$__["z"].string().default(""),
+    PMED_REPORT_QUEUE_ENDPOINT: __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$zod$2f$v3$2f$external$2e$js__$5b$app$2d$rsc$5d$__$28$ecmascript$29$__$3c$export__$2a$__as__z$3e$__["z"].string().default("")
 });
 const env = schema.parse({
     DATABASE_URL: process.env.DATABASE_URL,
@@ -40,7 +41,8 @@ const env = schema.parse({
     CLINIC_STUDENT_PERSONAL_INFO_ENDPOINT: process.env.CLINIC_STUDENT_PERSONAL_INFO_ENDPOINT ?? "",
     GUIDANCE_STUDENT_PERSONAL_INFO_ENDPOINT: process.env.GUIDANCE_STUDENT_PERSONAL_INFO_ENDPOINT ?? "",
     GUIDANCE_STUDENT_ACADEMIC_RECORDS_ENDPOINT: process.env.GUIDANCE_STUDENT_ACADEMIC_RECORDS_ENDPOINT ?? "",
-    PMED_ENROLLMENT_STATISTICS_ENDPOINT: process.env.PMED_ENROLLMENT_STATISTICS_ENDPOINT ?? ""
+    PMED_ENROLLMENT_STATISTICS_ENDPOINT: process.env.PMED_ENROLLMENT_STATISTICS_ENDPOINT ?? "",
+    PMED_REPORT_QUEUE_ENDPOINT: process.env.PMED_REPORT_QUEUE_ENDPOINT ?? ""
 });
 }),
 "[project]/lib/session.ts [app-rsc] (ecmascript)", ((__turbopack_context__) => {

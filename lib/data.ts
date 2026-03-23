@@ -1412,7 +1412,7 @@ export async function getExportRows(workflowKey = "") {
         columns: ["User", "Action", "Module", "Details", "Created"],
         rows: auditLogsTable
           ? await query(
-          `select coalesce(concat(users.first_name, ' ', users.last_name), 'System') as user_name,
+          `select coalesce(nullif(trim(users.full_name), ''), nullif(trim(users.username), ''), 'System') as user_name,
                   audit_logs.action,
                   audit_logs.module,
                   audit_logs.details,
