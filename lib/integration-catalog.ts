@@ -82,6 +82,17 @@ export const integrationCatalog: IntegrationCatalogEntry[] = [
     uiMode: "api"
   },
   {
+    key: "enrollment-feed",
+    label: "Enrollment Feed",
+    direction: "outgoing",
+    office: "Cashier",
+    method: "GET",
+    description: "Cashier pulls a bulk enrollment feed with student and class details in a single request.",
+    consumers: ["Cashier"],
+    systemFolders: ["Registrar"],
+    uiMode: "api"
+  },
+  {
     key: "student-personal-info",
     label: "Student Personal Information",
     direction: "outgoing",

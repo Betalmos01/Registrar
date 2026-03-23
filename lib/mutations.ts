@@ -629,12 +629,50 @@ export async function createGrade(input: {
   actorId: number;
 }) {
   const gradesTable = await requireGradesTable();
-  const result = await pool.query(
-    `insert into ${gradesTable} (student_id, class_id, grade, remarks, created_at)
-     values ($1, $2, $3, $4, current_timestamp)
-     returning id`,
-    [input.studentId, input.classId, input.grade, input.remarks ?? ""]
+  const hasSemester = await hasColumn(gradesTable, "semester");
+  const existing = await queryOne<{ id: number }>(
+    `select id
+     from ${gradesTable}
+     where student_id = $1 and class_id = $2
+     order by created_at desc nulls last, id desc
+     limit 1`,
+    [input.studentId, input.classId]
   );
+
+  if (existing?.id) {
+    if (hasSemester) {
+      await pool.query(
+        `update ${gradesTable}
+         set semester = $1, grade = $2, remarks = $3
+         where id = $4`,
+        [input.semester ?? "", input.grade, input.remarks ?? "", existing.id]
+      );
+    } else {
+      await pool.query(
+        `update ${gradesTable}
+         set grade = $1, remarks = $2
+         where id = $3`,
+        [input.grade, input.remarks ?? "", existing.id]
+      );
+    }
+    await logAction(input.actorId, "Update", "Grades", `Updated existing subject grade for student ID ${input.studentId} in class ID ${input.classId}`);
+    return existing.id;
+  }
+
+  const result = hasSemester
+    ? await pool.query(
+        `insert into ${gradesTable} (student_id, class_id, semester, grade, remarks, created_at)
+         values ($1, $2, $3, $4, $5, current_timestamp)
+         returning id`,
+        [input.studentId, input.classId, input.semester ?? "", input.grade, input.remarks ?? ""]
+      )
+    : await pool.query(
+        `insert into ${gradesTable} (student_id, class_id, grade, remarks, created_at)
+         values ($1, $2, $3, $4, current_timestamp)
+         returning id`,
+        [input.studentId, input.classId, input.grade, input.remarks ?? ""]
+      );
+
   await logAction(input.actorId, "Create", "Grades", `Recorded subject grade for student ID ${input.studentId} in ${input.semester}`);
   return result.rows[0]?.id as number;
 }

@@ -254,9 +254,16 @@ export async function listStudents(search = "", program = "", year = "") {
       id: Number(student.id)
     }))
   );
+  const enrollmentStatuses = await getStudentLatestEnrollmentStatuses(
+    students.map((student) => ({
+      id: Number(student.id),
+      student_no: String(student.student_no ?? "")
+    }))
+  );
 
   return students.map((student) => ({
     ...student,
+    enrollment_status: enrollmentStatuses.get(Number(student.id)) ?? "Not Enrolled",
     payment_status: paymentStatuses.get(String(student.student_no ?? "").trim()) ?? "Pending",
     ...(incomingStatuses.get(Number(student.id)) ?? {
       medical_clearance_status: "Pending",
@@ -267,6 +274,89 @@ export async function listStudents(search = "", program = "", year = "") {
     ...(incomingDetails.get(Number(student.id)) ?? {})
   }));
   }
+
+export async function listStudentsBasic() {
+  const studentsTable = await getStudentsTable();
+  if (!studentsTable) {
+    return [];
+  }
+
+  return query<{
+    id: number;
+    student_no: string;
+    first_name: string;
+    last_name: string;
+    program: string | null;
+    year_level: string | null;
+  }>(
+    `select id, student_no, first_name, last_name, program, year_level
+     from ${studentsTable}
+     order by last_name, first_name, student_no`
+  );
+}
+
+async function getStudentLatestEnrollmentStatuses(students: Array<{ id: number; student_no: string }>) {
+  const statusMap = new Map<number, string>();
+  if (students.length === 0) {
+    return statusMap;
+  }
+
+  const enrollmentsTable = await getEnrollmentsTable();
+  if (!enrollmentsTable) {
+    return statusMap;
+  }
+
+  const studentIds = students.map((student) => Number(student.id)).filter((value) => Number.isFinite(value));
+  if (studentIds.length === 0) {
+    return statusMap;
+  }
+
+  const hasDeletedAt = await hasColumn(enrollmentsTable, "deleted_at");
+  const enrollmentRows = await query<{ student_id: number; status: string }>(
+    `select distinct on (student_id) student_id, status
+     from ${enrollmentsTable}
+     where student_id = any($1)
+     ${hasDeletedAt ? "and deleted_at is null" : ""}
+     order by student_id, created_at desc nulls last, id desc`,
+    [studentIds]
+  );
+
+  enrollmentRows.forEach((row) => {
+    const normalized = String(row.status ?? "").trim();
+    if (normalized) {
+      statusMap.set(Number(row.student_id), normalized);
+    }
+  });
+
+  const cashierFeedTable = await resolveTableName("cashier_registrar_student_enrollment_feed");
+  if (cashierFeedTable) {
+    const studentNos = students.map((student) => String(student.student_no ?? "").trim()).filter(Boolean);
+    if (studentNos.length > 0) {
+      const feedRows = await query<{ student_no: string; status: string }>(
+        `select distinct on (student_no) student_no, status
+         from ${cashierFeedTable}
+         where student_no = any($1)
+         order by student_no, coalesce(action_at, sent_at, created_at) desc nulls last, id desc`,
+        [studentNos]
+      );
+
+      const studentIdByNo = new Map(
+        students.map((student) => [String(student.student_no ?? "").trim(), Number(student.id)] as const)
+      );
+
+      feedRows.forEach((row) => {
+        const studentId = studentIdByNo.get(String(row.student_no ?? "").trim());
+        if (!studentId) return;
+        const normalized = String(row.status ?? "").trim();
+        if (normalized) {
+          statusMap.set(studentId, normalized);
+        }
+      });
+    }
+  }
+
+  return statusMap;
+}
 
 function normalizePaymentStatus(status: string | null | undefined) {
   const normalized = String(status ?? "").trim().toLowerCase();
@@ -822,19 +912,46 @@ export async function listEnrollments() {
   }
 
   const hasDeletedAt = await hasColumn(enrollmentsTable, "deleted_at");
+  const hasCashierEnrollmentFeed = await hasTable("cashier_registrar_student_enrollment_feed");
+  const hasAcademicYearColumn = await hasColumn(enrollmentsTable, "academic_year");
+  const hasSemesterColumn = await hasColumn(enrollmentsTable, "semester");
+  const hasTuitionFeeColumn = await hasColumn(enrollmentsTable, "tuition_fee");
+  const hasDownpaymentAmountColumn = await hasColumn(enrollmentsTable, "downpayment_amount");
+  const hasMedicalFeeColumn = await hasColumn(enrollmentsTable, "medical_fee");
+  const hasIdFeeColumn = await hasColumn(enrollmentsTable, "id_fee");
+
+  const cashierFeedJoin = hasCashierEnrollmentFeed
+    ? `left join lateral (
+         select feed.status
+         from public.cashier_registrar_student_enrollment_feed as feed
+         where feed.student_no = students.student_no
+           and (
+             ${hasAcademicYearColumn ? "coalesce(feed.academic_year, '') = '' or feed.academic_year = enrollments.academic_year" : "true"}
+           )
+           and (
+             ${hasSemesterColumn ? "coalesce(feed.semester, '') = '' or feed.semester = enrollments.semester" : "true"}
+           )
+         order by coalesce(feed.action_at, feed.sent_at, feed.created_at) desc nulls last, feed.id desc
+         limit 1
+       ) as cashier_feed on true`
+    : "";
+
   return query(
-    `select enrollments.id, enrollments.student_id, enrollments.class_id, enrollments.status, enrollments.created_at,
-            ${await hasColumn(enrollmentsTable, "academic_year") ? "enrollments.academic_year," : "'' as academic_year,"}
-            ${await hasColumn(enrollmentsTable, "semester") ? "enrollments.semester," : "'' as semester,"}
-            ${await hasColumn(enrollmentsTable, "tuition_fee") ? "enrollments.tuition_fee," : "0::numeric as tuition_fee,"}
-            ${await hasColumn(enrollmentsTable, "downpayment_amount") ? "enrollments.downpayment_amount," : "0::numeric as downpayment_amount,"}
-            ${await hasColumn(enrollmentsTable, "medical_fee") ? "enrollments.medical_fee," : "0::numeric as medical_fee,"}
-            ${await hasColumn(enrollmentsTable, "id_fee") ? "enrollments.id_fee," : "0::numeric as id_fee,"}
-            students.student_no, students.first_name, students.last_name,
-            classes.class_code, classes.title
+    `select enrollments.id, enrollments.student_id, enrollments.class_id,
+            ${hasCashierEnrollmentFeed ? "coalesce(nullif(cashier_feed.status, ''), enrollments.status)" : "enrollments.status"} as status,
+            enrollments.created_at,
+            ${hasAcademicYearColumn ? "enrollments.academic_year," : "'' as academic_year,"}
+            ${hasSemesterColumn ? "enrollments.semester," : "'' as semester,"}
+            ${hasTuitionFeeColumn ? "enrollments.tuition_fee," : "0::numeric as tuition_fee,"}
+            ${hasDownpaymentAmountColumn ? "enrollments.downpayment_amount," : "0::numeric as downpayment_amount,"}
+            ${hasMedicalFeeColumn ? "enrollments.medical_fee," : "0::numeric as medical_fee,"}
+            ${hasIdFeeColumn ? "enrollments.id_fee," : "0::numeric as id_fee,"}
+            students.student_no, students.first_name, students.last_name, students.program, students.year_level,
+            classes.class_code, classes.title, classes.course
      from ${enrollmentsTable} as enrollments
      join ${studentsTable} as students on students.id = enrollments.student_id
      join ${classesTable} as classes on classes.id = enrollments.class_id
+     ${cashierFeedJoin}
      ${hasDeletedAt ? "where enrollments.deleted_at is null" : ""}
      order by enrollments.created_at desc`
   );
@@ -881,7 +998,14 @@ export async function listGrades() {
   return query(
     `select grades.id, grades.student_id, grades.class_id, ${await hasColumn(gradesTable, "semester") ? "coalesce(grades.semester, '')" : "''"} as semester, grades.grade, grades.remarks,
             students.student_no, students.first_name, students.last_name,
-            classes.class_code, classes.title
+            classes.class_code, classes.title,
+            avg(
+              case
+                when trim(coalesce(grades.grade, '')) ~ '^[0-9]+(\.[0-9]+)?$'
+                then cast(grades.grade as numeric)
+                else null
+              end
+            ) over (partition by grades.student_id) as student_average
      from ${gradesTable} as grades
      join ${studentsTable} as students on students.id = grades.student_id
      join ${classesTable} as classes on classes.id = grades.class_id

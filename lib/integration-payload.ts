@@ -40,6 +40,35 @@ export async function getIntegrationPayload(resource: string, options: { student
     return { students: Number(students ?? 0), enrollments: Number(enrollments ?? 0), classes: Number(classes ?? 0) };
   }
 
+  if (resource === "enrollment-feed") {
+    if (!enrollmentsTable || !studentsTable || !classesTable) {
+      return { rows: [] };
+    }
+
+    const rows = await pool.query(
+      `select
+         enrollments.id as enrollment_id,
+         enrollments.status as enrollment_status,
+         coalesce(enrollments.academic_year, '')::text as academic_year,
+         coalesce(enrollments.semester, '')::text as semester,
+         coalesce(enrollments.downpayment_amount, 0)::numeric as downpayment_amount,
+         coalesce(enrollments.created_at, now())::text as created_at,
+         students.student_no,
+         coalesce(students.first_name, '')::text as first_name,
+         coalesce(students.last_name, '')::text as last_name,
+         trim(concat_ws(' ', coalesce(students.first_name, ''), coalesce(students.last_name, '')))::text as full_name,
+         classes.class_code,
+         coalesce(classes.title, '')::text as title
+       from ${enrollmentsTable} as enrollments
+       inner join ${studentsTable} as students on students.id = enrollments.student_id
+       inner join ${classesTable} as classes on classes.id = enrollments.class_id
+       order by enrollments.created_at desc nulls last, enrollments.id desc
+       limit 400`
+    );
+
+    return { rows: rows.rows };
+  }
+
   const student = studentNo
     ? studentsTable ? await queryOne(`select * from ${studentsTable} where student_no = $1 limit 1`, [studentNo]) : null
     : studentId > 0

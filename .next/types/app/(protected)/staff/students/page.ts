@@ -1,4 +1,4 @@
-// File: C:\Users\hayat\OneDrive\Documents\Com\Registrar\app\(protected)\staff\students\page.tsx
+// File: C:\xampp\htdocs\bpm commision\Registrar\app\(protected)\staff\students\page.tsx
 import * as entry from '../../../../../../app/(protected)/staff/students/page.js'
 import type { ResolvingMetadata, ResolvingViewport } from 'next/dist/lib/metadata/types/metadata-interface.js'
 

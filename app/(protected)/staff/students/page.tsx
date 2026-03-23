@@ -31,7 +31,7 @@ export default async function StudentsPage({
       <div className="content-grid">
         <SectionCard title="Student Master List" description="This list remains the intake endpoint for the rest of the registrar workflow.">
           <StudentsTablePanel
-            students={students as Array<{ id: number; student_no: string; first_name: string; last_name: string; program: string | null; year_level: string | null; status: string; payment_status?: string | null; medical_clearance_status?: string | null; counseling_report_status?: string | null; discipline_record_status?: string | null; activity_participation_status?: string | null }>}
+            students={students as Array<{ id: number; student_no: string; first_name: string; last_name: string; program: string | null; year_level: string | null; status: string; enrollment_status?: string | null; payment_status?: string | null; medical_clearance_status?: string | null; counseling_report_status?: string | null; discipline_record_status?: string | null; activity_participation_status?: string | null }>}
             filters={filters}
             params={params}
             nextStudentNumber={nextStudentNumber}

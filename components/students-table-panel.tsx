@@ -38,7 +38,7 @@ const YEAR_OPTIONS = ["1", "2", "3", "4"];
 
 function FileStatusIcon() {
   return (
-    <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
+    <svg viewBox="0 0 20 20" width="18" height="18" fill="none" aria-hidden="true">
       <path d="M6 2.5h5l3.5 3.5V16a1.5 1.5 0 0 1-1.5 1.5H6A2.5 2.5 0 0 1 3.5 15V5A2.5 2.5 0 0 1 6 2.5Z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
       <path d="M11 2.5V6h3.5" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
     </svg>
@@ -54,6 +54,7 @@ type StudentRecord = {
   program: string | null;
   year_level: string | null;
   status: string;
+  enrollment_status?: string | null;
   birth_date?: string | null;
   mother_name?: string | null;
   father_name?: string | null;
@@ -92,6 +93,14 @@ type IntegrationModalState = {
   detail?: IntegrationRecordDetail;
 };
 
+type CurriculumModalState = {
+  studentName: string;
+  studentNo: string;
+  program: string | null;
+  yearLevel: string | null;
+  subjects: string[];
+};
+
 export function StudentsTablePanel({
   students,
   filters,
@@ -108,9 +117,10 @@ export function StudentsTablePanel({
   const router = useRouter();
   const pathname = usePathname();
   const [isPending, startTransition] = useTransition();
-  const [activeModal, setActiveModal] = useState<"add" | "edit" | "view" | "integration" | null>(null);
+  const [activeModal, setActiveModal] = useState<"add" | "edit" | "view" | "integration" | "curriculum" | null>(null);
   const [selectedStudent, setSelectedStudent] = useState<StudentRecord | null>(null);
   const [selectedIntegration, setSelectedIntegration] = useState<IntegrationModalState | null>(null);
+  const [selectedCurriculum, setSelectedCurriculum] = useState<CurriculumModalState | null>(null);
   const [searchValue, setSearchValue] = useState(params.q ?? "");
   const [programValue, setProgramValue] = useState(params.program ?? "");
   const [yearValue, setYearValue] = useState(params.year ?? "");
@@ -172,7 +182,7 @@ export function StudentsTablePanel({
           <span className="field-label">Course</span>
           <div className="filter-input-shell select-filter-shell">
             <span className="filter-icon" aria-hidden="true">
-              <svg viewBox="0 0 20 20" fill="none">
+              <svg viewBox="0 0 20 20" width="18" height="18" fill="none">
                 <path d="M3 5h14l-5.4 6.3v3.9l-3.2 1.8v-5.7L3 5Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
               </svg>
             </span>
@@ -188,7 +198,7 @@ export function StudentsTablePanel({
           <span className="field-label">Year Level</span>
           <div className="filter-input-shell select-filter-shell">
             <span className="filter-icon" aria-hidden="true">
-              <svg viewBox="0 0 20 20" fill="none">
+              <svg viewBox="0 0 20 20" width="18" height="18" fill="none">
                 <path d="M3 5h14l-5.4 6.3v3.9l-3.2 1.8v-5.7L3 5Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
               </svg>
             </span>
@@ -215,6 +225,7 @@ export function StudentsTablePanel({
           "Year",
           "All Subjects",
           "Status",
+          "Enrollment",
           "Payment",
           "Medical",
           "Counseling",
@@ -246,15 +257,25 @@ export function StudentsTablePanel({
             <td>{String(student.program ?? "-")}</td>
             <td>{String(student.year_level ?? "-")}</td>
             <td>
-              <div className="actions-row">
-                {getSubjectsForStudent(student.program, student.year_level).map((subject) => (
-                  <span key={`${student.id}-${subject}`} className="soft-badge">
-                    {subject}
-                  </span>
-                ))}
-              </div>
+              <button
+                className="secondary compact-button"
+                type="button"
+                onClick={() => {
+                  setSelectedCurriculum({
+                    studentName: `${String(student.first_name)} ${String(student.last_name)}`,
+                    studentNo: String(student.student_no),
+                    program: student.program,
+                    yearLevel: student.year_level,
+                    subjects: getSubjectsForStudent(student.program, student.year_level)
+                  });
+                  setActiveModal("curriculum");
+                }}
+              >
+                View Curriculum
+              </button>
             </td>
             <td><StatusBadge value={String(student.status)} /></td>
+            <td><StatusBadge value={String(student.enrollment_status ?? "Not Enrolled")} /></td>
             <td><StatusBadge value={String(student.payment_status ?? "Pending")} /></td>
             <td>
               <div className="integration-file-cell">
@@ -576,6 +597,39 @@ export function StudentsTablePanel({
                   <div className="status-row"><span>Title</span><strong>{selectedIntegration.detail?.title || `${selectedIntegration.label} file not yet received.`}</strong></div>
                   <div className="status-row full-info-row"><span>Notes</span><strong>{selectedIntegration.detail?.notes || "No uploaded notes or record details available yet."}</strong></div>
                 </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {activeModal === "curriculum" && selectedCurriculum ? (
+        <div className="modal-backdrop" role="presentation" onClick={() => setActiveModal(null)}>
+          <div className="modal-card" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-head">
+              <div>
+                <div className="eyebrow">Student Curriculum</div>
+                <h3>{selectedCurriculum.studentName}</h3>
+                <p>{`${selectedCurriculum.studentNo} - ${selectedCurriculum.program ?? "No Program"} (${selectedCurriculum.yearLevel ? `Year ${selectedCurriculum.yearLevel}` : "No Year"})`}</p>
+              </div>
+              <button className="secondary compact-button" type="button" onClick={() => setActiveModal(null)}>Close</button>
+            </div>
+
+            <div className="report-card top-gap">
+              <div className="eyebrow">Curriculum Subjects</div>
+              <h3>Assigned Subjects</h3>
+              <div className="status-stack top-gap">
+                {selectedCurriculum.subjects.length ? (
+                  selectedCurriculum.subjects.map((subject) => (
+                    <div key={`${selectedCurriculum.studentNo}-${subject}`} className="status-row">
+                      <strong>{subject}</strong>
+                    </div>
+                  ))
+                ) : (
+                  <div className="status-row">
+                    <strong>No subjects found for this student yet.</strong>
+                  </div>
+                )}
               </div>
             </div>
           </div>

@@ -1,4 +1,4 @@
-// File: C:\Users\hayat\OneDrive\Documents\Com\Registrar\app\layout.tsx
+// File: C:\xampp\htdocs\bpm commision\Registrar\app\layout.tsx
 import * as entry from '../../../app/layout.js'
 import type { ResolvingMetadata, ResolvingViewport } from 'next/dist/lib/metadata/types/metadata-interface.js'
 

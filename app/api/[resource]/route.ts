@@ -91,6 +91,12 @@ async function requireSessionRole(role: "Administrator" | "Registrar Staff") {
 
 async function requireIntegrationAccess(request: Request) {
   const apiKey = request.headers.get("x-integration-key") || request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") || "";
+  if (!env.INTEGRATION_API_KEY) {
+    const host = new URL(request.url).hostname.toLowerCase();
+    if (host === "localhost" || host === "127.0.0.1") {
+      return { id: null, role: "integration" };
+    }
+  }
   if (env.INTEGRATION_API_KEY && apiKey === env.INTEGRATION_API_KEY) {
     return { id: null, role: "integration" };
   }
@@ -99,6 +105,12 @@ async function requireIntegrationAccess(request: Request) {
 
 async function requireIntegrationUser(request: Request) {
   const apiKey = request.headers.get("x-integration-key") || request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") || "";
+  if (!env.INTEGRATION_API_KEY) {
+    const host = new URL(request.url).hostname.toLowerCase();
+    if (host === "localhost" || host === "127.0.0.1") {
+      return { id: null, role: "integration" };
+    }
+  }
   if (env.INTEGRATION_API_KEY && apiKey === env.INTEGRATION_API_KEY) {
     return { id: null, role: "integration" };
   }

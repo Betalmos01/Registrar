@@ -30,7 +30,8 @@ const STUDENT_DISPATCH_TARGETS: StudentDispatchTarget[] = [
     label: "Cashier",
     resource: "enrollment-data",
     consumer: "Cashier",
-    endpoint: env.CASHIER_ENROLLMENT_DATA_ENDPOINT
+    // Cashier integration is database-first; do not call local HTTP APIs.
+    endpoint: ""
   },
   {
     key: "clinic",
@@ -95,9 +96,14 @@ const FEED_CONFIG_BY_TARGET: Record<StudentDispatchTargetKey, FeedConfig> = {
     table: "crad_registrar_student_list_feed"
   }
 };
+const feedEnsurePromiseByTable = new Map<string, Promise<string>>();
 
 function getTarget(targetKey: string) {
   return STUDENT_DISPATCH_TARGETS.find((target) => target.key === targetKey);
+}
+
+function isDatabaseOnlyTarget(target: StudentDispatchTarget) {
+  return target.key === "cashier";
 }
 
 function matchesCradSubject(value: string) {
@@ -142,13 +148,30 @@ function buildStudentListPayload(target: StudentDispatchTarget, students: any[])
   };
 }
 
-async function buildPayload(target: StudentDispatchTarget, studentNo?: string) {
+async function buildPayload(
+  target: StudentDispatchTarget,
+  options?: {
+    studentNo?: string;
+    studentId?: number;
+  }
+) {
   if (target.key === "cashier") {
+    const studentNoFilter = String(options?.studentNo ?? "").trim();
+    const studentIdFilter = Number(options?.studentId ?? 0);
     const enrollments = await listEnrollments();
+    const filteredEnrollments = (enrollments as any[]).filter((item) => {
+      if (studentNoFilter && String(item.student_no ?? "").trim() !== studentNoFilter) {
+        return false;
+      }
+      if (studentIdFilter > 0 && Number(item.student_id ?? 0) !== studentIdFilter) {
+        return false;
+      }
+      return true;
+    });
     return {
       target: target.label,
-      total_enrollments: enrollments.length,
-      rows: (enrollments as any[]).map((item) => ({
+      total_enrollments: filteredEnrollments.length,
+      rows: filteredEnrollments.map((item) => ({
         student_no: String(item.student_no ?? ""),
         student_name: `${String(item.last_name ?? "")}, ${String(item.first_name ?? "")}`.trim(),
         class_code: String(item.class_code ?? ""),
@@ -156,7 +179,10 @@ async function buildPayload(target: StudentDispatchTarget, studentNo?: string) {
         academic_year: String(item.academic_year ?? ""),
         semester: String(item.semester ?? ""),
         status: String(item.status ?? ""),
-        downpayment_amount: String(item.downpayment_amount ?? 0)
+        tuition_fee: Number(item.tuition_fee ?? 0),
+        downpayment_amount: Number(item.downpayment_amount ?? 0),
+        medical_fee: Number(item.medical_fee ?? 0),
+        id_fee: Number(item.id_fee ?? 0)
       }))
     };
   }
@@ -213,26 +239,32 @@ function getFeedTableName(config: FeedConfig) {
 
 async function ensureDispatchFeedTable(config: FeedConfig) {
   const tableName = getFeedTableName(config);
+  const cachedPromise = feedEnsurePromiseByTable.get(tableName);
+  if (cachedPromise) {
+    return cachedPromise;
+  }
+  const ensurePromise = (async () => {
+  const isCashierFeed = config.schema === "public" && config.table === "cashier_registrar_student_enrollment_feed";
 
-  await pool.query(`create schema if not exists ${config.schema}`);
-  await pool.query(
-    `create table if not exists ${tableName} (
-      id bigserial primary key,
-      batch_id text not null,
-      source text not null default 'Registrar',
-      target_key text not null,
-      target_label text not null,
-      row_index integer not null,
-      student_no text,
-      student_name text,
-      program text,
-      year_level text,
-      status text,
-      payload jsonb not null default '{}'::jsonb,
-      sent_at timestamptz not null default current_timestamp,
-      created_at timestamptz not null default current_timestamp
-    )`
-  );
+    await pool.query(`create schema if not exists ${config.schema}`);
+    await pool.query(
+      `create table if not exists ${tableName} (
+        id bigserial primary key,
+        batch_id text not null,
+        source text not null default 'Registrar',
+        target_key text not null,
+        target_label text not null,
+        row_index integer not null,
+        student_no text,
+        student_name text,
+        program text,
+        year_level text,
+        status text,
+        payload jsonb not null default '{}'::jsonb,
+        sent_at timestamptz not null default current_timestamp,
+        created_at timestamptz not null default current_timestamp
+      )`
+    );
 
   const requiredColumns: Array<{ name: string; definition: string }> = [
     { name: "batch_id", definition: "text not null default ''" },
@@ -245,22 +277,40 @@ async function ensureDispatchFeedTable(config: FeedConfig) {
     { name: "program", definition: "text" },
     { name: "year_level", definition: "text" },
     { name: "status", definition: "text" },
+    ...(isCashierFeed
+      ? [
+          { name: "academic_year", definition: "text" },
+          { name: "semester", definition: "text" },
+          { name: "tuition_fee", definition: "numeric(12,2) not null default 0.00" },
+          { name: "downpayment_amount", definition: "numeric(12,2) not null default 0.00" },
+          { name: "medical_fee", definition: "numeric(12,2) not null default 0.00" },
+          { name: "id_fee", definition: "numeric(12,2) not null default 0.00" }
+        ]
+      : []),
     { name: "payload", definition: "jsonb not null default '{}'::jsonb" },
     { name: "sent_at", definition: "timestamptz not null default current_timestamp" },
     { name: "created_at", definition: "timestamptz not null default current_timestamp" }
   ];
 
-  for (const column of requiredColumns) {
-    if (!(await hasColumn(tableName, column.name))) {
-      await pool.query(`alter table ${tableName} add column ${column.name} ${column.definition}`);
+    for (const column of requiredColumns) {
+      if (!(await hasColumn(tableName, column.name))) {
+        await pool.query(`alter table ${tableName} add column ${column.name} ${column.definition}`);
+      }
     }
-  }
 
-  await pool.query(
-    `create index if not exists ${config.table}_batch_idx
-     on ${tableName} (batch_id, sent_at desc, row_index asc)`
-  );
-  return tableName;
+    await pool.query(
+      `create index if not exists ${config.table}_batch_idx
+       on ${tableName} (batch_id, sent_at desc, row_index asc)`
+    );
+    return tableName;
+  })();
+  feedEnsurePromiseByTable.set(tableName, ensurePromise);
+  try {
+    return await ensurePromise;
+  } catch (error) {
+    feedEnsurePromiseByTable.delete(tableName);
+    throw error;
+  }
 }
 
 function getFeedRowStudentName(row: Record<string, unknown>) {
@@ -281,6 +331,7 @@ async function persistStudentBatch(target: StudentDispatchTarget, payload: any) 
 
   const config = FEED_CONFIG_BY_TARGET[target.key];
   const tableName = await ensureDispatchFeedTable(config);
+  const isCashierFeed = target.key === "cashier";
   const batchId = crypto.randomUUID();
   const sentAt = new Date().toISOString();
   const client = await pool.connect();
@@ -290,25 +341,44 @@ async function persistStudentBatch(target: StudentDispatchTarget, payload: any) 
 
     for (let index = 0; index < rows.length; index += 1) {
       const row = rows[index] as Record<string, unknown>;
-      await client.query(
-        `insert into ${tableName}
-          (batch_id, source, target_key, target_label, row_index, student_no, student_name, program, year_level, status, payload, sent_at, created_at)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::timestamptz, current_timestamp)`,
-        [
-          batchId,
-          "Registrar",
-          target.key,
-          target.label,
-          index + 1,
-          String(row.student_no ?? ""),
-          getFeedRowStudentName(row),
-          String(row.program ?? ""),
-          String(row.year_level ?? ""),
-          String(row.status ?? ""),
-          JSON.stringify(row),
-          sentAt
-        ]
-      );
+      const commonValues = [
+        batchId,
+        "Registrar",
+        target.key,
+        target.label,
+        index + 1,
+        String(row.student_no ?? ""),
+        getFeedRowStudentName(row),
+        String(row.program ?? ""),
+        String(row.year_level ?? ""),
+        String(row.status ?? "")
+      ] as const;
+
+      if (isCashierFeed) {
+        await client.query(
+          `insert into ${tableName}
+            (batch_id, source, target_key, target_label, row_index, student_no, student_name, program, year_level, status, academic_year, semester, tuition_fee, downpayment_amount, medical_fee, id_fee, payload, sent_at, created_at)
+           values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17::jsonb, $18::timestamptz, current_timestamp)`,
+          [
+            ...commonValues,
+            String(row.academic_year ?? ""),
+            String(row.semester ?? ""),
+            Number(row.tuition_fee ?? 0),
+            Number(row.downpayment_amount ?? 0),
+            Number(row.medical_fee ?? 0),
+            Number(row.id_fee ?? 0),
+            JSON.stringify(row),
+            sentAt
+          ]
+        );
+      } else {
+        await client.query(
+          `insert into ${tableName}
+            (batch_id, source, target_key, target_label, row_index, student_no, student_name, program, year_level, status, payload, sent_at, created_at)
+           values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::timestamptz, current_timestamp)`,
+          [...commonValues, JSON.stringify(row), sentAt]
+        );
+      }
     }
 
     await client.query("commit");
@@ -328,13 +398,16 @@ async function persistStudentBatch(target: StudentDispatchTarget, payload: any) 
   };
 }
 
-export async function getStudentDispatchPreview(options: { targetKey: string; studentNo?: string }) {
+export async function getStudentDispatchPreview(options: { targetKey: string; studentNo?: string; studentId?: number }) {
   const target = getTarget(options.targetKey);
   if (!target) {
     throw new Error("Unknown student integration destination.");
   }
 
-  const payload = await buildPayload(target, options.studentNo);
+  const payload = await buildPayload(target, {
+    studentNo: options.studentNo,
+    studentId: options.studentId
+  });
 
   return {
     target: {
@@ -348,7 +421,7 @@ export async function getStudentDispatchPreview(options: { targetKey: string; st
   };
 }
 
-export async function dispatchStudentData(options: { targetKey: string; studentNo?: string }) {
+export async function dispatchStudentData(options: { targetKey: string; studentNo?: string; studentId?: number }) {
   const preview = await getStudentDispatchPreview(options);
 
   try {
@@ -359,7 +432,7 @@ export async function dispatchStudentData(options: { targetKey: string; studentN
       response: unknown;
     } | null = null;
 
-    if (preview.target.endpoint) {
+    if (!isDatabaseOnlyTarget(preview.target) && preview.target.endpoint) {
       try {
         const response = await fetch(preview.target.endpoint, {
           method: "POST",
@@ -402,7 +475,9 @@ export async function dispatchStudentData(options: { targetKey: string; studentN
 
     return {
       ok: true,
-      message: `Student data sent to ${preview.target.label}.`,
+      message: isDatabaseOnlyTarget(preview.target)
+        ? `Student data saved to ${preview.target.label} feed table via database.`
+        : `Student data sent to ${preview.target.label}.`,
       target: preview.target,
       payload: preview.payload,
       storage,

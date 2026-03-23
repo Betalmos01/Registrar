@@ -156,6 +156,13 @@ export function EnrollmentsTablePanel({
   const semesters = Array.from(
     new Set(enrollments.map((item) => item.semester).filter((value): value is string => Boolean(value)))
   );
+  const statusOptions = Array.from(
+    new Set(
+      enrollments
+        .map((item) => String(item.status ?? "").trim())
+        .filter((value): value is string => Boolean(value))
+    )
+  ).sort((left, right) => left.localeCompare(right));
 
   async function openStatsModal() {
     setActiveModal("sendStats");
@@ -252,9 +259,11 @@ export function EnrollmentsTablePanel({
             </span>
             <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
               <option value="">All Statuses</option>
-              <option value="Enrolled">Enrolled</option>
-              <option value="Pending">Pending</option>
-              <option value="Waitlisted">Waitlisted</option>
+              {statusOptions.map((status) => (
+                <option key={status} value={status}>
+                  {status}
+                </option>
+              ))}
             </select>
           </div>
         </label>

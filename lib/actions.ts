@@ -98,6 +98,11 @@ const FIXED_DOWNPAYMENT_AMOUNT = 500;
 const FIXED_MEDICAL_FEE = 250;
 const FIXED_ID_FEE = 250;
 
+function parseCurrencyInput(value: FormDataEntryValue | null, fallback: number) {
+  const parsed = Number(value ?? fallback);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
 export async function loginAction(formData: FormData) {
   const username = String(formData.get("username") ?? "").trim();
   const password = String(formData.get("password") ?? "");
@@ -359,6 +364,10 @@ export async function createClassListAction(formData: FormData) {
 export async function createEnrollmentAction(formData: FormData) {
   const user = await requireSessionUser();
   let studentId = Number(formData.get("student_id") ?? 0);
+  const tuitionFee = parseCurrencyInput(formData.get("tuition_fee"), FIXED_TUITION_FEE);
+  const downpaymentAmount = parseCurrencyInput(formData.get("downpayment_amount"), FIXED_DOWNPAYMENT_AMOUNT);
+  const medicalFee = parseCurrencyInput(formData.get("medical_fee"), FIXED_MEDICAL_FEE);
+  const idFee = parseCurrencyInput(formData.get("id_fee"), FIXED_ID_FEE);
 
   if (!studentId) {
     const { getNextStudentNumber } = await import("./data");
@@ -387,12 +396,22 @@ export async function createEnrollmentAction(formData: FormData) {
     status: String(formData.get("status") ?? "Enrolled").trim() || "Enrolled",
     academicYear: String(formData.get("academic_year") ?? "").trim(),
     semester: String(formData.get("semester") ?? "").trim(),
-    tuitionFee: FIXED_TUITION_FEE,
-    downpaymentAmount: FIXED_DOWNPAYMENT_AMOUNT,
-    medicalFee: FIXED_MEDICAL_FEE,
-    idFee: FIXED_ID_FEE,
+    tuitionFee,
+    downpaymentAmount,
+    medicalFee,
+    idFee,
     actorId: user.id
   });
+  try {
+    await import("./student-data-dispatch").then(({ dispatchStudentData }) =>
+      dispatchStudentData({
+        targetKey: "cashier",
+        studentId
+      })
+    );
+  } catch {
+    // Non-blocking if cashier shared feed table is unavailable temporarily.
+  }
   try {
     const flowResult = await import("./department-integration").then(({ dispatchRegistrarDepartmentFlow }) =>
       dispatchRegistrarDepartmentFlow({
@@ -425,15 +444,19 @@ export async function createEnrollmentAction(formData: FormData) {
 
 export async function updateEnrollmentAction(formData: FormData) {
   const user = await requireSessionUser();
+  const tuitionFee = parseCurrencyInput(formData.get("tuition_fee"), FIXED_TUITION_FEE);
+  const downpaymentAmount = parseCurrencyInput(formData.get("downpayment_amount"), FIXED_DOWNPAYMENT_AMOUNT);
+  const medicalFee = parseCurrencyInput(formData.get("medical_fee"), FIXED_MEDICAL_FEE);
+  const idFee = parseCurrencyInput(formData.get("id_fee"), FIXED_ID_FEE);
   await updateEnrollment({
     id: Number(formData.get("id") ?? 0),
     status: String(formData.get("status") ?? "").trim(),
     academicYear: String(formData.get("academic_year") ?? "").trim(),
     semester: String(formData.get("semester") ?? "").trim(),
-    tuitionFee: FIXED_TUITION_FEE,
-    downpaymentAmount: FIXED_DOWNPAYMENT_AMOUNT,
-    medicalFee: FIXED_MEDICAL_FEE,
-    idFee: FIXED_ID_FEE,
+    tuitionFee,
+    downpaymentAmount,
+    medicalFee,
+    idFee,
     actorId: user.id
   });
   await setSuccessFlash("Enrollment updated successfully.");
@@ -474,22 +497,37 @@ export async function purgeEnrollmentAction(formData: FormData) {
 
 export async function createGradeAction(formData: FormData) {
   const user = await requireSessionUser();
+  const studentId = Number(formData.get("student_id") ?? 0);
   await createGrade({
-    studentId: Number(formData.get("student_id") ?? 0),
+    studentId,
     classId: Number(formData.get("class_id") ?? 0),
     semester: String(formData.get("semester") ?? "").trim(),
     grade: String(formData.get("grade") ?? "").trim(),
     remarks: String(formData.get("remarks") ?? "").trim(),
     actorId: user.id
   });
+  if (studentId > 0) {
+    try {
+      await import("./student-data-dispatch").then(({ dispatchStudentData }) =>
+        dispatchStudentData({
+          targetKey: "crad",
+          studentId
+        })
+      );
+    } catch {
+      // Non-blocking if CRAD shared feed table is unavailable temporarily.
+    }
+  }
   await setSuccessFlash("Grade saved successfully.");
   revalidatePath("/staff/grades");
   revalidatePath("/staff/class-lists");
+  revalidatePath("/admin/integrations");
   revalidateCorePaths();
 }
 
 export async function updateGradeAction(formData: FormData) {
   const user = await requireSessionUser();
+  const studentId = Number(formData.get("student_id") ?? 0);
   await updateGrade({
     id: Number(formData.get("id") ?? 0),
     semester: String(formData.get("semester") ?? "").trim(),
@@ -497,9 +535,22 @@ export async function updateGradeAction(formData: FormData) {
     remarks: String(formData.get("remarks") ?? "").trim(),
     actorId: user.id
   });
+  if (studentId > 0) {
+    try {
+      await import("./student-data-dispatch").then(({ dispatchStudentData }) =>
+        dispatchStudentData({
+          targetKey: "crad",
+          studentId
+        })
+      );
+    } catch {
+      // Non-blocking if CRAD shared feed table is unavailable temporarily.
+    }
+  }
   await setSuccessFlash("Grade updated successfully.");
   revalidatePath("/staff/grades");
   revalidatePath("/staff/class-lists");
+  revalidatePath("/admin/integrations");
   revalidateCorePaths();
 }
 
